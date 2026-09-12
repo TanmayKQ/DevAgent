@@ -8,3 +8,8 @@ venv/
 *.egg-info/
 .pytest_cache/
 .vitest-cache/
+.env
+
+# Intentional test fixture, not a real dependency — searchCode's ignored-dirs test needs it tracked.
+!harness/test/fixtures/sample-repo/node_modules/
+!harness/test/fixtures/sample-repo/node_modules/**

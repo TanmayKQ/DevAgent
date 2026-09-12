@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://devagent.dev/schemas/tools/search_code.schema.json",
+  "title": "search_code",
+  "description": "Case-insensitive substring search for `query` across text files in the repository (or under `path` if given). Returns matching lines with file path and line number. Binary files and common ignored directories (node_modules, .git, dist, build, venv, __pycache__, .devagent) are skipped.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["query"],
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Substring to search for."
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory to scope the search to, relative to the repository root. Defaults to the whole repository."
+    },
+    "maxResults": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "description": "Maximum number of matches to return. Defaults to 50."
+    }
+  }
+}

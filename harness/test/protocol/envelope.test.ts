@@ -42,9 +42,8 @@ describe("validateEnvelope", () => {
   });
 
   it("falls back to permissive validation for a type without a dedicated payload schema", () => {
-    // tool_call has no schemas/messages/tool_call.schema.json yet (arrives at M1+) —
-    // envelope-level validation must still pass so the type enum can be complete from M0.
-    const envelope = createEnvelope("tool_call", { anything: "goes" }, "session-1");
+    // ask_user has no schemas/messages/ask_user.schema.json yet (arrives when M2/M3 need it).
+    const envelope = createEnvelope("ask_user", { anything: "goes" }, "session-1");
     expect(validateEnvelope(envelope).valid).toBe(true);
   });
 });

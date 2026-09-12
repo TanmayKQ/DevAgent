@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://devagent.dev/schemas/messages/plan_update.schema.json",
+  "title": "plan_update payload",
+  "description": "Streamed status updates from the reasoning loop's graph nodes, for live CLI display. Purely informational — never required for correctness.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step"],
+  "properties": {
+    "step": { "type": "string", "minLength": 1 },
+    "detail": { "type": "object" }
+  }
+}

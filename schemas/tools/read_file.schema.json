@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://devagent.dev/schemas/tools/read_file.schema.json",
+  "title": "read_file",
+  "description": "Read the contents of a text file in the repository. Path is relative to the repository root (use forward slashes, e.g. \"src/index.ts\"). Large files are truncated; check the `truncated` field in the result.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path"],
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "File path relative to the repository root."
+    }
+  }
+}

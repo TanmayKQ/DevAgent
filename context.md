@@ -28,7 +28,7 @@ Full requirements live in `DevAgent_PRD.md` in this same output — read it befo
 ## Current state
 
 - [x] M0 — Protocol & skeleton (harness ⇄ Python ping/pong)
-- [ ] M1 — Read-only agent (`read_file`, `list_dir`, `search_code`)
+- [x] M1 — Read-only agent (`read_file`, `list_dir`, `search_code`)
 - [ ] M2 — Write path (`apply_patch`/`write_file` + diff preview/confirm)
 - [ ] M3 — Execution (`run_command` + allowlist + sandbox)
 - [ ] M4 — Full plan → act → observe → replan loop on benchmark tasks
@@ -59,6 +59,23 @@ registry from its own module location — callers never need to remember to call
 themselves (an early version required this and every test/CLI call site that forgot it crashed
 with a confusing "Schemas not initialized" error deep inside the stdout handler; that failure
 mode should not resurface as M1+ adds more entry points).
+
+## Current state — detail (M1)
+
+Real end-to-end agent loop works: `devagent run "<task>" --repo <path>` spawns the reasoning
+loop, drives a LangGraph `plan -> act -> observe -> reflect -> finish` graph, executes
+`read_file`/`list_dir`/`search_code` through the harness's schema-validated, jailed tool
+registry, and streams `plan_update`/`tool_call`/`tool_result`/`final_answer` to the terminal.
+LLM provider is **Google Gemini** (user's choice — see decisions log), via
+`langchain-google-genai` + `langgraph`, default model `gemini-2.5-flash`, overridable with
+`--model`. Key comes from `GOOGLE_API_KEY`/`GEMINI_API_KEY`, loaded from a gitignored `.env` at
+the repo root (`.env.example` documents the var).
+
+43 Vitest tests (path jail incl. symlink-escape and `..`/absolute/UNC rejection, all three
+tools against a fixture `sample-repo`, the tool registry's schema validation and error
+handling, plus two full cross-process integration tests) + 13 pytest tests (protocol mirror +
+4 graph tests against a scripted fake model) all pass. No test needs a live API key — see the
+`DEVAGENT_FAKE_LLM_RESPONSES` decision below.
 
 ## Decisions log
 
@@ -98,14 +115,46 @@ mode should not resurface as M1+ adds more entry points).
   `reasoning/src/devagent_reasoning/protocol.py`)**, not a fixed relative-path offset — works
   identically whether code runs from `harness/src` (dev, via tsx) or `harness/dist` (built),
   and doesn't care what cwd a subprocess is spawned with. — 2026-09-12
-- **Deferred, not decided**: LLM provider(s) — real decision point is M1, once actual
-  tool-calling starts. Packaging/bundling strategy — M5. Live session resume — stretch goal,
-  post-M4. See "Open questions" below; these are still open.
+- **LLM provider: Google Gemini** (user's explicit choice when asked at the start of M1), via
+  `langchain-google-genai`'s `ChatGoogleGenerativeAI` + `langgraph`. Default model
+  `gemini-2.5-flash`, overridable per-run with `--model`. Packaging/bundling strategy (M5) and
+  live session resume (post-M4 stretch) are still open — see "Open questions". — 2026-09-12
+- **Tool call/result get their own generic envelope schema plus a second, per-tool schema**
+  (`schemas/tools/<name>.schema.json`), rather than one big oneOf. `tool_call.schema.json`
+  only constrains `{call_id, name, arguments:object}`; the harness's tool registry validates
+  `arguments` a second time against the specific tool's schema before executing. Keeps adding
+  tools (M2 write, M3 exec) additive instead of editing one growing union schema. The same
+  per-tool schema file doubles as the LLM's tool-call description (`schemas/tools/*.schema.json`
+  read by `reasoning/src/devagent_reasoning/tools.py`) — one file, two consumers, no drift.
+  — 2026-09-12
+- **Cross-process tool execution uses LangGraph's `interrupt()`/`Command(resume=...)`**
+  (verified directly against the installed `langgraph` 1.2.11 API before building on it, not
+  assumed from memory — this project's LangGraph version is newer than commonly-documented
+  examples). The `act` node calls `interrupt(tool_call_payload)`, which pauses the compiled
+  graph and returns control to `__main__.py`; the harness executes the tool and
+  `__main__.py` resumes with `Command(resume=tool_result)`. This is *the* mechanism that keeps
+  the reasoning loop honest about never touching the filesystem: the only way out of `act` is
+  through the caller. Gotcha: LangGraph re-runs all of a node's code before its `interrupt()`
+  call on every resume, so a `notify()` placed in `act` fired twice per tool call; moved to
+  `plan` (which runs exactly once) instead. — 2026-09-12
+- **`DEVAGENT_FAKE_LLM_RESPONSES` env var** (path to a JSON file of scripted
+  `{"tool_call":{name,args}}` / `{"text":...}` steps) swaps in a `FakeMessagesListChatModel`
+  instead of constructing `ChatGoogleGenerativeAI`. This is what lets
+  `harness/test/integration/task.test.ts` spawn a *real* Python process and exercise the *real*
+  wire protocol and *real* tool execution end-to-end with no API key — stronger coverage than
+  graph-level unit tests alone, and still satisfies "no live LLM calls in tests" (NFR5).
+  — 2026-09-12
+- **A tool-call failure (bad args, unknown tool, path-jail violation, handler exception) becomes
+  a `tool_result{ok:false, error}`, not a protocol-level `error` envelope** — it's fed back into
+  the graph as a `ToolMessage` so the LLM can see what went wrong and retry differently (a
+  concrete instance of FR5's "replan on failure" even for read-only tools). Protocol-level
+  `error` envelopes stay reserved for envelope/schema violations and unexpected exceptions
+  (e.g. the LLM call itself failing, such as a missing API key) that abort the whole task rather
+  than one step of it. — 2026-09-12
 
 ## Open questions
 
 - Final packaging strategy: single `npm` package that shells out to a bundled Python venv, vs. two separate installs the user wires together, vs. bundling the Python side as a PyInstaller binary.
-- Which LLM provider(s) to support first (single-provider v1 vs. abstracted from the start).
 - How session resume should work beyond read-only replay (stretch goal per PRD).
 
 ## How to use this file

@@ -91,7 +91,8 @@ def test_schema_registry_rejects_unknown_envelope_field():
 
 
 def test_schema_registry_falls_back_to_permissive_validation_for_unmapped_type():
+    # ask_user has no schemas/messages/ask_user.schema.json yet (arrives when M2/M3 need it).
     registry = SchemaRegistry(REPO_ROOT / "schemas")
-    envelope = make_envelope("tool_call", {"anything": "goes"}, "session-1")
+    envelope = make_envelope("ask_user", {"anything": "goes"}, "session-1")
     result = registry.validate_envelope(envelope)
     assert result.valid, result.errors

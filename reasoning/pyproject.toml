@@ -5,6 +5,10 @@ description = "DevAgent reasoning loop: LangGraph-based planning and tool-callin
 requires-python = ">=3.10"
 dependencies = [
     "jsonschema>=4.21",
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "langchain-google-genai>=2.0",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]

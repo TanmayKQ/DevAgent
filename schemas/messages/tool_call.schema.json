@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://devagent.dev/schemas/messages/tool_call.schema.json",
+  "title": "tool_call payload",
+  "description": "Envelope-level shape only. `arguments` is validated a second time by the harness against schemas/tools/<name>.schema.json before the tool actually runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["call_id", "name", "arguments"],
+  "properties": {
+    "call_id": { "type": "string", "minLength": 1 },
+    "name": {
+      "type": "string",
+      "enum": ["read_file", "list_dir", "search_code"]
+    },
+    "arguments": { "type": "object" }
+  }
+}

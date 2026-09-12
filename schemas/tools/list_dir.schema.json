@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://devagent.dev/schemas/tools/list_dir.schema.json",
+  "title": "list_dir",
+  "description": "List the immediate contents (files and subdirectories, non-recursive) of a directory in the repository. Use \".\" for the repository root.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path"],
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory path relative to the repository root, or \".\" for the root."
+    }
+  }
+}
