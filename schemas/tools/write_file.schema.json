@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://devagent.dev/schemas/tools/write_file.schema.json",
+  "title": "write_file",
+  "description": "Create a new file or overwrite an existing file's entire contents. Path is relative to the repository root; parent directories are created automatically. For a small edit to an existing file, prefer apply_patch instead — it's safer and produces a clearer diff. Requires user confirmation unless the harness is running with --yolo/--auto.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path", "content"],
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "File path relative to the repository root."
+    },
+    "content": {
+      "type": "string",
+      "description": "The complete new contents of the file."
+    }
+  }
+}

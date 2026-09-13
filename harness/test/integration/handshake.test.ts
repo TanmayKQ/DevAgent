@@ -44,7 +44,10 @@ describe("harness <-> reasoning-loop handshake (integration)", () => {
 
       proc.start();
       try {
-        const pong = await proc.ping(sessionId, 5000);
+        // Generous timeout: several integration test files now spawn real Python subprocesses
+        // concurrently, and process-startup contention under parallel test execution can push
+        // a cold Python interpreter + LangGraph/langchain import past a tight timeout.
+        const pong = await proc.ping(sessionId, 15000);
         expect(pong.type).toBe("pong");
       } finally {
         await proc.stop();

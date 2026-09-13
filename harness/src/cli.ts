@@ -8,7 +8,18 @@ import { initSchemas, createEnvelope } from "./protocol/envelope.js";
 import { findRepoRoot } from "./config/repoPaths.js";
 import { PythonReasoningProcess } from "./process/pythonProcess.js";
 import { AuditLogger } from "./logging/auditLog.js";
-import { initToolRegistry, executeToolCall, type ToolCallPayload } from "./tools/registry.js";
+import {
+  initToolRegistry,
+  executeToolCall,
+  toolRequiresConfirmation,
+  validateToolCallArguments,
+  toToolResultError,
+  type ToolCallPayload,
+  type ToolResultPayload,
+} from "./tools/registry.js";
+import { planWriteFile, planApplyPatch, commitWrite, type WriteFileArgs, type ApplyPatchArgs } from "./tools/writePlan.js";
+import { buildDiffPreview } from "./tools/diffPreview.js";
+import { confirm } from "./cli/confirm.js";
 import type { Envelope } from "./protocol/envelope.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -79,16 +90,31 @@ program
   .requiredOption("--repo <path>", "path to the target repository")
   .option("--model <name>", "override the reasoning loop's default model")
   .option("--max-iterations <n>", "maximum plan/act iterations before giving up", "15")
-  .action(async (task: string, cmdOpts: { repo: string; model?: string; maxIterations: string }) => {
-    const opts = program.opts<{ verbose: boolean; python: string }>();
-    const maxIterations = Number.parseInt(cmdOpts.maxIterations, 10);
-    if (!Number.isInteger(maxIterations) || maxIterations < 1) {
-      console.error(`--max-iterations must be a positive integer, got: ${cmdOpts.maxIterations}`);
-      process.exitCode = 1;
-      return;
-    }
-    await runTask(task, cmdOpts.repo, maxIterations, cmdOpts.model, opts.python, opts.verbose);
-  });
+  .option("--yolo", "skip the confirmation prompt for write_file/apply_patch (still previewed, still jailed, still logged)", false)
+  .option("--auto", "alias for --yolo", false)
+  .action(
+    async (
+      task: string,
+      cmdOpts: { repo: string; model?: string; maxIterations: string; yolo: boolean; auto: boolean },
+    ) => {
+      const opts = program.opts<{ verbose: boolean; python: string }>();
+      const maxIterations = Number.parseInt(cmdOpts.maxIterations, 10);
+      if (!Number.isInteger(maxIterations) || maxIterations < 1) {
+        console.error(`--max-iterations must be a positive integer, got: ${cmdOpts.maxIterations}`);
+        process.exitCode = 1;
+        return;
+      }
+      await runTask(
+        task,
+        cmdOpts.repo,
+        maxIterations,
+        cmdOpts.model,
+        opts.python,
+        opts.verbose,
+        cmdOpts.yolo || cmdOpts.auto,
+      );
+    },
+  );
 
 async function runTask(
   task: string,
@@ -97,6 +123,7 @@ async function runTask(
   model: string | undefined,
   pythonCmd: string,
   verbose: boolean,
+  autoApprove: boolean,
 ): Promise<void> {
   const targetRepoRoot = resolve(process.cwd(), repoArg);
   if (!existsSync(targetRepoRoot) || !statSync(targetRepoRoot).isDirectory()) {
@@ -142,6 +169,43 @@ async function runTask(
     settle(1);
   });
 
+  async function handleWriteToolCall(call: ToolCallPayload): Promise<ToolResultPayload> {
+    const validation = validateToolCallArguments(call);
+    if (!validation.valid) {
+      return { call_id: call.call_id, ok: false, error: { code: "invalid_arguments", message: validation.errors.join("; ") } };
+    }
+
+    let plan;
+    try {
+      plan =
+        call.name === "write_file"
+          ? planWriteFile(targetRepoRoot, call.arguments as WriteFileArgs)
+          : planApplyPatch(targetRepoRoot, call.arguments as ApplyPatchArgs);
+    } catch (err) {
+      return toToolResultError(call.call_id, err);
+    }
+
+    console.log(buildDiffPreview(plan));
+
+    let approved: boolean;
+    if (autoApprove) {
+      approved = true;
+    } else {
+      approved = await confirm(`Apply this ${call.name} to ${plan.relPath}? [y/N] `);
+      console.log(); // keep the result line on its own line regardless of how the terminal echoed the answer
+    }
+    if (!approved) {
+      return {
+        call_id: call.call_id,
+        ok: false,
+        error: { code: "user_rejected", message: "The user declined to apply this change." },
+      };
+    }
+
+    const applied = commitWrite(plan);
+    return { call_id: call.call_id, ok: true, result: applied as unknown as object };
+  }
+
   async function handleMessage(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
       case "plan_update": {
@@ -153,7 +217,9 @@ async function runTask(
       case "tool_call": {
         const call = envelope.payload as ToolCallPayload;
         console.log(`  ⚙ ${call.name}(${JSON.stringify(call.arguments)})`);
-        const result = await executeToolCall(targetRepoRoot, call);
+        const result = toolRequiresConfirmation(call.name)
+          ? await handleWriteToolCall(call)
+          : await executeToolCall(targetRepoRoot, call);
         console.log(result.ok ? "  ← ok" : `  ← error: ${result.error?.message}`);
         proc.send(createEnvelope("tool_result", result, sessionId));
         return;

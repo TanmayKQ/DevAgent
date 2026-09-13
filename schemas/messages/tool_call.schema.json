@@ -10,7 +10,7 @@
     "call_id": { "type": "string", "minLength": 1 },
     "name": {
       "type": "string",
-      "enum": ["read_file", "list_dir", "search_code"]
+      "enum": ["read_file", "list_dir", "search_code", "write_file", "apply_patch"]
     },
     "arguments": { "type": "object" }
   }

@@ -9,11 +9,12 @@ See `DevAgent_PRD.md` for the full spec and `context.md` for current project sta
 
 ## Status
 
-**M0 (protocol skeleton) and M1 (read-only agent) are done.** The harness can spawn the
-reasoning loop and run a full plan -> act -> observe -> reflect -> finish loop against a real
-repository using `read_file`, `list_dir`, and `search_code`, backed by Gemini. Every message is
-schema-validated and audit-logged. See `context.md` for the milestone checklist and what's next
-(write path with confirmation lands at M2).
+**M0 (protocol skeleton), M1 (read-only agent), and M2 (write path) are done.** The harness runs
+a full plan -> act -> observe -> reflect -> finish loop against a real repository using
+`read_file`, `list_dir`, `search_code`, `write_file`, and `apply_patch`, backed by Gemini. Every
+write is shown as a diff and requires confirmation by default (`--yolo`/`--auto` to skip the
+prompt). Every message is schema-validated and audit-logged. See `context.md` for the milestone
+checklist and what's next (command execution + sandboxing lands at M3).
 
 ## Setup
 
@@ -57,7 +58,12 @@ node harness/dist/cli.js run "what does this repo do?" --repo /path/to/some/repo
 
 Streams each plan step and tool call live, then prints DevAgent's final answer. Flags:
 `--repo <path>` (required), `--model <name>` (default `gemini-2.5-flash`), `--max-iterations <n>`
-(default 15), `--verbose` (echo raw protocol traffic). Requires `GOOGLE_API_KEY`/`GEMINI_API_KEY`.
+(default 15), `--yolo`/`--auto` (skip write confirmation), `--verbose` (echo raw protocol
+traffic). Requires `GOOGLE_API_KEY`/`GEMINI_API_KEY`.
+
+Any `write_file` or `apply_patch` call is shown as a unified diff and needs a `y`/`N` answer
+before it's applied — decline and the reasoning loop gets told so it can adapt. `--yolo`/`--auto`
+applies changes without asking (the diff is still printed and still logged).
 
 ## Tests
 

@@ -1,7 +1,14 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { initToolRegistry, executeToolCall } from "../../src/tools/registry.js";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import {
+  initToolRegistry,
+  executeToolCall,
+  toolRequiresConfirmation,
+  validateToolCallArguments,
+} from "../../src/tools/registry.js";
 import { findRepoRoot } from "../../src/config/repoPaths.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -60,5 +67,83 @@ describe("executeToolCall", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("not_found");
+  });
+});
+
+describe("toolRequiresConfirmation", () => {
+  it("is true for write_file and apply_patch", () => {
+    expect(toolRequiresConfirmation("write_file")).toBe(true);
+    expect(toolRequiresConfirmation("apply_patch")).toBe(true);
+  });
+
+  it("is false for the read-only tools and for unknown names", () => {
+    expect(toolRequiresConfirmation("read_file")).toBe(false);
+    expect(toolRequiresConfirmation("list_dir")).toBe(false);
+    expect(toolRequiresConfirmation("search_code")).toBe(false);
+    expect(toolRequiresConfirmation("no_such_tool")).toBe(false);
+  });
+});
+
+describe("validateToolCallArguments", () => {
+  it("accepts valid write_file arguments without executing anything", () => {
+    const result = validateToolCallArguments({
+      call_id: "v1",
+      name: "write_file",
+      arguments: { path: "a.txt", content: "hi" },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects apply_patch arguments missing new_string", () => {
+    const result = validateToolCallArguments({
+      call_id: "v2",
+      name: "apply_patch",
+      arguments: { path: "a.txt", old_string: "x" },
+    });
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe("executeToolCall for write-tier tools (mechanical execution, no confirmation)", () => {
+  let writableRepo: string;
+
+  afterEach(() => {
+    if (writableRepo) rmSync(writableRepo, { recursive: true, force: true });
+  });
+
+  it("write_file actually writes through executeToolCall", async () => {
+    writableRepo = mkdtempSync(join(tmpdir(), "devagent-registry-write-"));
+    const result = await executeToolCall(writableRepo, {
+      call_id: "w1",
+      name: "write_file",
+      arguments: { path: "out.txt", content: "hello" },
+    });
+    expect(result.ok).toBe(true);
+    expect(readFileSync(join(writableRepo, "out.txt"), "utf8")).toBe("hello");
+  });
+
+  it("apply_patch actually edits through executeToolCall", async () => {
+    writableRepo = mkdtempSync(join(tmpdir(), "devagent-registry-patch-"));
+    mkdirSync(writableRepo, { recursive: true });
+    writeFileSync(join(writableRepo, "a.txt"), "foo bar\n");
+    const result = await executeToolCall(writableRepo, {
+      call_id: "w2",
+      name: "apply_patch",
+      arguments: { path: "a.txt", old_string: "bar", new_string: "baz" },
+    });
+    expect(result.ok).toBe(true);
+    expect(readFileSync(join(writableRepo, "a.txt"), "utf8")).toBe("foo baz\n");
+  });
+
+  it("apply_patch returns ok:false with no_match instead of throwing", async () => {
+    writableRepo = mkdtempSync(join(tmpdir(), "devagent-registry-nomatch-"));
+    writeFileSync(join(writableRepo, "a.txt"), "foo\n");
+    const result = await executeToolCall(writableRepo, {
+      call_id: "w3",
+      name: "apply_patch",
+      arguments: { path: "a.txt", old_string: "nope", new_string: "x" },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("no_match");
   });
 });

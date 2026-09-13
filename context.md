@@ -29,7 +29,7 @@ Full requirements live in `DevAgent_PRD.md` in this same output — read it befo
 
 - [x] M0 — Protocol & skeleton (harness ⇄ Python ping/pong)
 - [x] M1 — Read-only agent (`read_file`, `list_dir`, `search_code`)
-- [ ] M2 — Write path (`apply_patch`/`write_file` + diff preview/confirm)
+- [x] M2 — Write path (`apply_patch`/`write_file` + diff preview/confirm)
 - [ ] M3 — Execution (`run_command` + allowlist + sandbox)
 - [ ] M4 — Full plan → act → observe → replan loop on benchmark tasks
 - [ ] M5 — Hardening, packaging, docs, demo
@@ -76,6 +76,30 @@ tools against a fixture `sample-repo`, the tool registry's schema validation and
 handling, plus two full cross-process integration tests) + 13 pytest tests (protocol mirror +
 4 graph tests against a scripted fake model) all pass. No test needs a live API key — see the
 `DEVAGENT_FAKE_LLM_RESPONSES` decision below.
+
+## Current state — detail (M2)
+
+Write path works end-to-end: the LLM can call `write_file` (create/overwrite) and `apply_patch`
+(exact old_string/new_string replacement — see decisions log for why not a raw unified diff).
+Both are registered as `requiresConfirmation: true` in the tool registry. In `devagent run`,
+any call to one of them is intercepted in the CLI *before* `executeToolCall` — the harness
+computes a `WritePlan` (reads current content, works out the new content, but does not write
+yet), renders it as a real unified diff (`diff` npm package's `createTwoFilesPatch`), prints it,
+and prompts `Apply this <tool> to <path>? [y/N]` (skipped, not hidden, under `--yolo`/`--auto`).
+Only on approval does `commitWrite()` actually touch disk. A decline becomes a
+`tool_result{ok:false, error:{code:"user_rejected"}}` fed back to the graph — same
+replan-on-failure path as any other tool error, so the LLM sees the rejection and can adapt.
+
+`executeToolCall` (the registry's own mechanical path, used directly by tests and any
+non-interactive caller) still supports `write_file`/`apply_patch` with **no** confirmation —
+confirmation is deliberately a CLI/UX-layer concern layered on top, not baked into tool
+execution itself, so the registry stays a plain "validate then run" dispatcher regardless of
+risk tier.
+
+29 new tests (11 `writePlan`/`commitWrite`, 2 diff-preview, 6 `confirm()`, extended registry
+coverage, and 3 end-to-end tests that spawn the actual built `devagent` binary as a subprocess
+with piped `y`/`n`/no stdin) — 72 Vitest + 13 pytest total, all passing, still no live API key
+required anywhere.
 
 ## Decisions log
 
@@ -151,6 +175,35 @@ handling, plus two full cross-process integration tests) + 13 pytest tests (prot
   `error` envelopes stay reserved for envelope/schema violations and unexpected exceptions
   (e.g. the LLM call itself failing, such as a missing API key) that abort the whole task rather
   than one step of it. — 2026-09-12
+- **`apply_patch` is exact-match search/replace (`old_string`/`new_string`/`replace_all`), not a
+  raw unified diff the LLM writes freely.** Free-form diff hunks are a known LLM failure mode
+  (off-by-one context lines, whitespace drift) — requiring an exact substring match forces the
+  model to have accurate knowledge of the file's current content (normally from having just
+  `read_file`'d it), and a mismatch fails cleanly (`no_match`/`ambiguous_match`) instead of
+  silently applying wrong. Same design Claude Code's own Edit tool uses. The harness still
+  builds a real unified diff for the confirmation UI — the LLM-facing *input* format and the
+  human-facing *preview* format are independent choices. — 2026-09-13
+- **Write execution is a plan/commit split** (`planWriteFile`/`planApplyPatch` compute the
+  prospective new content without touching disk; `commitWrite` does the actual write), not one
+  step. This lets the CLI build an accurate diff and ask for confirmation *before* any mutation,
+  then apply exactly what was previewed with no re-validation gap between "shown to user" and
+  "written to disk". `executeToolCall` (registry.ts) composes the same two steps back-to-back
+  for callers that don't need a confirmation step (tests, `--yolo` doesn't even need this
+  distinction since it still previews, just doesn't block on an answer). — 2026-09-13
+- **Confirmation lives in the CLI, not the tool registry.** `executeToolCall` stays a pure
+  "validate then run" dispatcher for every tool regardless of risk tier — a registry consumer
+  (tests, a future non-interactive caller) that wants write tools to just work does not have to
+  fight an interactive prompt baked into the tool layer. The CLI's `run` command is the one place
+  that checks `toolRequiresConfirmation(name)` and interposes the diff+prompt for write-tier
+  tools before ever calling the mutation. — 2026-09-13
+- **`confirm()` must treat a closed/EOF'd input stream as "no", not hang forever.**
+  `readline.question()`'s callback only fires on a newline-terminated line; an input stream that
+  ends without one (piped-then-closed stdin, `/dev/null`, a non-interactive CI shell) never
+  fires it, and the original implementation awaited that callback alone — found via a test using
+  `Readable.from([""])` that hung until Vitest's timeout. Fixed by also resolving `false` on the
+  readline interface's `close` event. Real-world implication this prevents: `devagent run`
+  without `--yolo` in any environment with closed/absent stdin would otherwise deadlock forever
+  on the first write tool call instead of failing safe. — 2026-09-13
 
 ## Open questions
 

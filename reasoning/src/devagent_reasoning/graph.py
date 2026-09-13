@@ -9,7 +9,6 @@ effects: the only way out of `act` is through the caller.
 from __future__ import annotations
 
 import json
-import operator
 from typing import Annotated, Any, Callable, Optional, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
@@ -19,10 +18,16 @@ from langgraph.graph.message import add_messages
 from langgraph.types import interrupt
 
 SYSTEM_PROMPT = (
-    "You are DevAgent, an autonomous coding assistant with read-only access to a repository "
-    "via the read_file, list_dir, and search_code tools. Use them as needed to answer the "
-    "user's question about the repository. When you have enough information, reply with a "
-    "final plain-text answer and do not call any more tools."
+    "You are DevAgent, an autonomous coding assistant working in a repository via read_file, "
+    "list_dir, search_code, write_file, and apply_patch. Read before you write: use read_file "
+    "to see a file's exact current content before editing it. Prefer apply_patch (an exact "
+    "old_string/new_string replacement) for small, targeted edits to existing files — it's "
+    "safer and easier for the user to review than rewriting a whole file; use write_file only "
+    "to create a new file or when a full rewrite is genuinely what's needed. Every write is "
+    "shown to the user as a diff and may be declined, so if a tool_result reports the change "
+    "was rejected or didn't apply, adapt your approach rather than repeating the same call. "
+    "When you have enough information, reply with a final plain-text answer and do not call "
+    "any more tools."
 )
 
 NotifyFn = Callable[[str, Optional[dict[str, Any]]], None]
