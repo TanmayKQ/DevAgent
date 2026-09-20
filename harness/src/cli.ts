@@ -19,7 +19,9 @@ import {
 } from "./tools/registry.js";
 import { planWriteFile, planApplyPatch, commitWrite, type WriteFileArgs, type ApplyPatchArgs } from "./tools/writePlan.js";
 import { buildDiffPreview } from "./tools/diffPreview.js";
-import { confirm } from "./cli/confirm.js";
+import { prepareRunCommand, type RunCommandArgs } from "./tools/prepareRunCommand.js";
+import { executePlan } from "./tools/runCommand.js";
+import { createConfirmChannel, type ConfirmChannel } from "./cli/confirm.js";
 import type { Envelope } from "./protocol/envelope.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -90,7 +92,11 @@ program
   .requiredOption("--repo <path>", "path to the target repository")
   .option("--model <name>", "override the reasoning loop's default model")
   .option("--max-iterations <n>", "maximum plan/act iterations before giving up", "15")
-  .option("--yolo", "skip the confirmation prompt for write_file/apply_patch (still previewed, still jailed, still logged)", false)
+  .option(
+    "--yolo",
+    "skip the confirmation prompt for write_file/apply_patch/run_command (still previewed, still jailed/allowlisted, still logged)",
+    false,
+  )
   .option("--auto", "alias for --yolo", false)
   .action(
     async (
@@ -158,6 +164,15 @@ async function runTask(
     settle = resolvePromise;
   });
 
+  // One channel for the whole task run, created lazily on the first confirmation actually
+  // needed (a read-only task never touches stdin at all) and reused for every one after it —
+  // see confirm.ts for why this matters with piped/scripted input.
+  let confirmChannel: ConfirmChannel | undefined;
+  function getConfirmChannel(): ConfirmChannel {
+    if (!confirmChannel) confirmChannel = createConfirmChannel();
+    return confirmChannel;
+  }
+
   proc.on("message", (envelope: Envelope) => {
     logger.log("from_python", envelope);
     if (verbose) process.stderr.write(`<- ${JSON.stringify(envelope)}\n`);
@@ -191,7 +206,7 @@ async function runTask(
     if (autoApprove) {
       approved = true;
     } else {
-      approved = await confirm(`Apply this ${call.name} to ${plan.relPath}? [y/N] `);
+      approved = await getConfirmChannel().ask(`Apply this ${call.name} to ${plan.relPath}? [y/N] `);
       console.log(); // keep the result line on its own line regardless of how the terminal echoed the answer
     }
     if (!approved) {
@@ -206,6 +221,42 @@ async function runTask(
     return { call_id: call.call_id, ok: true, result: applied as unknown as object };
   }
 
+  async function handleRunCommandCall(call: ToolCallPayload): Promise<ToolResultPayload> {
+    const validation = validateToolCallArguments(call);
+    if (!validation.valid) {
+      return { call_id: call.call_id, ok: false, error: { code: "invalid_arguments", message: validation.errors.join("; ") } };
+    }
+
+    let plan;
+    try {
+      plan = prepareRunCommand(targetRepoRoot, call.arguments as RunCommandArgs);
+    } catch (err) {
+      return toToolResultError(call.call_id, err);
+    }
+
+    console.log(`  DevAgent wants to run: ${[plan.command, ...plan.args].join(" ")}`);
+    console.log(`  in: ${plan.relCwd === "." ? "(repository root)" : plan.relCwd}`);
+
+    let approved: boolean;
+    if (autoApprove) {
+      approved = true;
+    } else {
+      approved = await getConfirmChannel().ask(`Proceed? [y/N] `);
+      console.log(); // keep the result line on its own line regardless of how the terminal echoed the answer
+    }
+    if (!approved) {
+      return {
+        call_id: call.call_id,
+        ok: false,
+        error: { code: "user_rejected", message: "The user declined to run this command." },
+      };
+    }
+
+    const result = await executePlan(plan);
+    console.log(`  exit code: ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`);
+    return { call_id: call.call_id, ok: true, result: result as unknown as object };
+  }
+
   async function handleMessage(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
       case "plan_update": {
@@ -217,9 +268,12 @@ async function runTask(
       case "tool_call": {
         const call = envelope.payload as ToolCallPayload;
         console.log(`  ⚙ ${call.name}(${JSON.stringify(call.arguments)})`);
-        const result = toolRequiresConfirmation(call.name)
-          ? await handleWriteToolCall(call)
-          : await executeToolCall(targetRepoRoot, call);
+        const result =
+          call.name === "run_command"
+            ? await handleRunCommandCall(call)
+            : toolRequiresConfirmation(call.name)
+              ? await handleWriteToolCall(call)
+              : await executeToolCall(targetRepoRoot, call);
         console.log(result.ok ? "  ← ok" : `  ← error: ${result.error?.message}`);
         proc.send(createEnvelope("tool_result", result, sessionId));
         return;
@@ -251,6 +305,7 @@ async function runTask(
   );
 
   process.exitCode = await done;
+  confirmChannel?.dispose();
   await proc.stop();
   await logger.close();
 }

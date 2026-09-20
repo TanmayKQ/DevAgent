@@ -7,6 +7,7 @@ import { listDir } from "./listDir.js";
 import { searchCode } from "./searchCode.js";
 import { writeFile } from "./writeFile.js";
 import { applyPatch } from "./applyPatch.js";
+import { runCommand } from "./runCommand.js";
 import { ToolExecutionError } from "./errors.js";
 import { PathJailError } from "./pathJail.js";
 
@@ -44,6 +45,7 @@ export function initToolRegistry(schemasDir: string): void {
   register(schemasDir, "search_code", searchCode, false);
   register(schemasDir, "write_file", writeFile, true);
   register(schemasDir, "apply_patch", applyPatch, true);
+  register(schemasDir, "run_command", runCommand, true);
   loaded = true;
 }
 

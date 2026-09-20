@@ -71,9 +71,10 @@ describe("executeToolCall", () => {
 });
 
 describe("toolRequiresConfirmation", () => {
-  it("is true for write_file and apply_patch", () => {
+  it("is true for write_file, apply_patch, and run_command", () => {
     expect(toolRequiresConfirmation("write_file")).toBe(true);
     expect(toolRequiresConfirmation("apply_patch")).toBe(true);
+    expect(toolRequiresConfirmation("run_command")).toBe(true);
   });
 
   it("is false for the read-only tools and for unknown names", () => {
@@ -145,5 +146,47 @@ describe("executeToolCall for write-tier tools (mechanical execution, no confirm
     });
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("no_match");
+  });
+});
+
+describe("executeToolCall for run_command (mechanical execution, no confirmation)", () => {
+  let writableRepo: string;
+
+  afterEach(() => {
+    if (writableRepo) rmSync(writableRepo, { recursive: true, force: true });
+  });
+
+  it("runs an allowed command and reports its exit code", async () => {
+    writableRepo = mkdtempSync(join(tmpdir(), "devagent-registry-cmd-"));
+    const result = await executeToolCall(writableRepo, {
+      call_id: "r1",
+      name: "run_command",
+      arguments: { command: "node", args: ["-e", "console.log('hi')"] },
+    });
+    expect(result.ok).toBe(true);
+    expect((result.result as { exitCode: number; stdout: string }).exitCode).toBe(0);
+    expect((result.result as { stdout: string }).stdout.trim()).toBe("hi");
+  });
+
+  it("returns ok:false with command_not_allowed for a disallowed command, instead of throwing", async () => {
+    writableRepo = mkdtempSync(join(tmpdir(), "devagent-registry-cmd-"));
+    const result = await executeToolCall(writableRepo, {
+      call_id: "r2",
+      name: "run_command",
+      arguments: { command: "curl", args: ["http://example.com"] },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("command_not_allowed");
+  });
+
+  it("returns ok:false with invalid_arguments when command is missing", async () => {
+    writableRepo = mkdtempSync(join(tmpdir(), "devagent-registry-cmd-"));
+    const result = await executeToolCall(writableRepo, {
+      call_id: "r3",
+      name: "run_command",
+      arguments: {},
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("invalid_arguments");
   });
 });

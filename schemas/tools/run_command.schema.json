@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://devagent.dev/schemas/tools/run_command.schema.json",
+  "title": "run_command",
+  "description": "Run a command against the repository (e.g. tests, a build, a type-check, a read-only git query). Only a fixed allowlist of commands is actually permitted — roughly: `npm test`, `npm run <script>`, `npx tsc`, `pytest`, `python -m pytest`, `node <file>`, and read-only `git status`/`git diff`/`git log`. Anything else is rejected before it runs. Requires user confirmation unless the harness is running with --yolo/--auto. Runs with no shell (so no `;`, `&&`, `|`, or redirection), a restricted environment, and a timeout.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command"],
+  "properties": {
+    "command": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The program to run, e.g. \"npm\", \"pytest\", \"node\", \"git\". Not a shell command line — do not include arguments here."
+    },
+    "args": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Arguments to pass to the program, as separate tokens (e.g. [\"run\", \"build\"]), not one combined string."
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory to run the command in, relative to the repository root. Defaults to the repository root."
+    }
+  }
+}

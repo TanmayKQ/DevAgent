@@ -30,7 +30,7 @@ Full requirements live in `DevAgent_PRD.md` in this same output — read it befo
 - [x] M0 — Protocol & skeleton (harness ⇄ Python ping/pong)
 - [x] M1 — Read-only agent (`read_file`, `list_dir`, `search_code`)
 - [x] M2 — Write path (`apply_patch`/`write_file` + diff preview/confirm)
-- [ ] M3 — Execution (`run_command` + allowlist + sandbox)
+- [x] M3 — Execution (`run_command` + allowlist + sandbox)
 - [ ] M4 — Full plan → act → observe → replan loop on benchmark tasks
 - [ ] M5 — Hardening, packaging, docs, demo
 
@@ -100,6 +100,53 @@ risk tier.
 coverage, and 3 end-to-end tests that spawn the actual built `devagent` binary as a subprocess
 with piped `y`/`n`/no stdin) — 72 Vitest + 13 pytest total, all passing, still no live API key
 required anywhere.
+
+## Current state — detail (M3)
+
+`run_command` works end-to-end, gated behind four independent layers (allowlist, no-shell
+execution, restricted env + directory confinement, timeout), on top of the same
+preview-then-confirm UX as M2's write tools:
+
+- **Allowlist** (`harness/src/tools/commandAllowlist.ts`): a fixed table of
+  `{command, allowedArgPrefixes}` rules. Only `npm test`, `npm run <anything>`, `npx tsc`,
+  `pytest` (any args), `python -m pytest` (only that prefix — blocks `python -c` entirely),
+  `node` (any args), and read-only `git status`/`diff`/`log` are permitted. Nothing else, in any
+  mode — `--yolo` skips the confirmation *prompt*, never the allowlist.
+- **No shell**: `spawn(command, args, {shell:false, ...})`, args passed as a real array — there
+  is no shell interpreter in the loop to misinterpret `;`/`&&`/`|`/backticks/redirection, which
+  closes off classic command-injection entirely rather than trying to filter for it.
+- **Best-effort argument screening** (`findSuspiciousArg`): rejects an arg containing a literal
+  `..` path segment or an absolute/UNC-looking path, on top of the allowlist. Documented as
+  defense-in-depth, not a real jail — unlike file-tool paths, run_command's args are opaque
+  per-tool flags/values with no generic way to know which ones are paths, so this can be evaded
+  by a sufficiently creative allowed command. The allowlist (which excludes general-purpose
+  file-access programs) is what's actually carrying the safety weight.
+- **Restricted environment**: the child only gets a small allowlisted set of OS/tooling vars
+  (PATH, TEMP, SystemRoot, etc.) — never `GOOGLE_API_KEY`/`GEMINI_API_KEY` or anything else
+  DevAgent itself holds. Verified with a real subprocess reading `process.env` for a canary var.
+- **Timeout + real process-tree kill**: 120s default. On timeout, `taskkill /pid <pid> /T /F` on
+  Windows (a plain `child.kill()` only kills the immediate process — a hung `npm test` that had
+  spawned its own child would otherwise survive), `SIGKILL` to the process group on POSIX.
+  Verified by actually starting a 30-second hang and confirming it's dead well before that.
+- **Output caps**: stdout/stderr each capped at 256KB (same cap as `read_file`), `truncated`
+  flags in the result rather than an unbounded buffer.
+
+`prepareRunCommand()` mirrors M2's plan/commit split: validates the allowlist, args, and cwd
+jail with zero side effects, so the CLI can preview ("DevAgent wants to run: `<command>`") and
+reject outright *before* ever prompting — a disallowed command never shows a confirmation prompt
+at all (verified end-to-end: no "Proceed?" in output, no stdin needed for that case to resolve).
+
+While manually exercising a real two-step task (write a file, then run it) — a scenario none of
+the M2 single-confirmation tests happened to cover — found and fixed a real bug in the
+confirmation prompt itself; see the decisions log entry below. That fix (`confirm.ts` rewritten
+around a hand-rolled line reader instead of `node:readline`) applies to M2's write confirmations
+too, not just M3.
+
+31 new tests (allowlist matching, suspicious-arg screening, `prepareRunCommand` validation,
+`runCommand` execution incl. a real timeout-kill and real env-scrubbing check, extended registry
+coverage, 4 end-to-end `run_command` confirm/decline/`--yolo`/disallowed tests, and 2 multi-step
+regression tests) plus a full rewrite of the `confirm()` test suite — 108 Vitest + 13 pytest
+total, all passing, still no live API key required anywhere.
 
 ## Decisions log
 
@@ -204,6 +251,48 @@ required anywhere.
   readline interface's `close` event. Real-world implication this prevents: `devagent run`
   without `--yolo` in any environment with closed/absent stdin would otherwise deadlock forever
   on the first write tool call instead of failing safe. — 2026-09-13
+- **`run_command`'s allowlist is `{command, allowedArgPrefixes}` rules, not just a bare list of
+  executable names.** A bare-executable allowlist would let `npm` through and then be unable to
+  distinguish `npm test` from `npm publish`, or `git status` from `git push --force`. Each rule's
+  args must match one of its allowed *prefixes* (e.g. `["run"]` permits `npm run <any script>`,
+  since that's bounded by the target repo's own package.json — a trust boundary already implied
+  by allowing `npm test` at all) — this is also what specifically defeats `python -c "<anything>"`
+  (python's rule only matches the exact prefix `["-m", "pytest"]`). — 2026-09-14
+- **`run_command` is not real OS-level sandboxing (no container/VM), and the user was told this
+  explicitly before M3 was built, not after.** The allowlist, no-shell execution, restricted
+  environment, directory confinement, and timeout are all "smart rules applied to a process
+  running directly on the host," not physical isolation — a command that's on the allowlist and
+  misbehaves within its own normal abilities inside the repo folder is not something this stops.
+  Chose this deliberately over adding Docker/container-based isolation: extra required software,
+  meaningful added complexity, and it would break the "clone + one command" demo experience that
+  is a stated project goal. Revisit only if a future milestone's threat model changes. — 2026-09-14
+- **The repo-root jail is real for `cwd` but only best-effort for `run_command`'s other
+  arguments** (`findSuspiciousArg`, screening for `..`/absolute/UNC patterns) — unlike
+  `read_file`/`write_file`/`apply_patch` where the harness knows exactly which argument is *the*
+  path and can fully resolve+contain it, `run_command`'s `args` are opaque per-tool
+  flags/values with no generic way to know which ones are paths at all, so a generic full-jail
+  check isn't tractable the same way. The allowlist (deliberately excluding general-purpose
+  file-access programs like `cat`/`cp`) is what actually keeps this safe, not the argument
+  screen — documented as such in code, not left implicit. — 2026-09-14
+- **`confirm()` was fully rewritten off `node:readline` onto a hand-rolled line reader** — a more
+  serious version of the EOF bug above, found by actually running a real two-confirmation task by
+  hand (write a file, then run it) rather than only unit-testing one confirmation at a time.
+  `readline.Interface` auto-closes itself as soon as its underlying stream ends, *discarding any
+  already-buffered-but-undelivered line* even if a second `question()` call would arrive moments
+  later — with piped/scripted input (the realistic case for any non-interactive run, including
+  every integration test), all answers typically arrive in one chunk before the stream ends, so
+  a task's *second* confirmation was silently resolving to "declined" no matter what the piped
+  answer said, with no error. Reusing one `Interface` across questions (the first fix attempted)
+  was not sufficient — the auto-close-on-stream-end behavior undermines even a shared instance.
+  Fix: a minimal hand-rolled line reader (`LineReader` in `harness/src/cli/confirm.ts`, the same
+  buffer-and-extract-a-line shape as the wire protocol's `LineFramer`) that reads directly off
+  the stream's own 'data'/'end' events instead of delegating to readline's interface lifecycle.
+  Real TTY use loses nothing — line editing/echo/backspace come from the OS terminal's own
+  cooked-mode handling, not from Node's readline. Must call `.dispose()` when done (removes the
+  'data' listener and pauses the stream) — leaving a stream in flowing mode would otherwise keep
+  the whole CLI process alive past when it should exit. Locked in with both a unit-level
+  regression test (two answers in one chunk) and a real end-to-end test driving the actual CLI
+  through a two-tool-call task. — 2026-09-14
 
 ## Open questions
 

@@ -9,12 +9,15 @@ See `DevAgent_PRD.md` for the full spec and `context.md` for current project sta
 
 ## Status
 
-**M0 (protocol skeleton), M1 (read-only agent), and M2 (write path) are done.** The harness runs
-a full plan -> act -> observe -> reflect -> finish loop against a real repository using
-`read_file`, `list_dir`, `search_code`, `write_file`, and `apply_patch`, backed by Gemini. Every
-write is shown as a diff and requires confirmation by default (`--yolo`/`--auto` to skip the
-prompt). Every message is schema-validated and audit-logged. See `context.md` for the milestone
-checklist and what's next (command execution + sandboxing lands at M3).
+**M0-M3 are done** (protocol skeleton, read-only agent, write path, command execution). The
+harness runs a full plan -> act -> observe -> reflect -> finish loop against a real repository
+using `read_file`, `list_dir`, `search_code`, `write_file`, `apply_patch`, and `run_command`,
+backed by Gemini. Every write and every command is shown to the user and requires confirmation
+by default (`--yolo`/`--auto` to skip the prompt). `run_command` only ever runs a fixed allowlist
+of commands (test runners, builds, type-checks, read-only git), with no shell, a restricted
+environment, a timeout, and capped output. Every message is schema-validated and audit-logged.
+See `context.md` for the milestone checklist and what's next (M4: the full loop against a
+benchmark task set).
 
 ## Setup
 
@@ -64,6 +67,16 @@ traffic). Requires `GOOGLE_API_KEY`/`GEMINI_API_KEY`.
 Any `write_file` or `apply_patch` call is shown as a unified diff and needs a `y`/`N` answer
 before it's applied — decline and the reasoning loop gets told so it can adapt. `--yolo`/`--auto`
 applies changes without asking (the diff is still printed and still logged).
+
+### Running commands (`run_command`)
+
+Only a fixed allowlist of commands can ever run, regardless of mode: `npm test`, `npm run
+<script>`, `npx tsc`, `pytest`, `python -m pytest`, `node <file>`, and read-only `git
+status`/`diff`/`log`. Nothing else — no installs, no destructive git, no general-purpose shell
+tools — is ever permitted, and there's no shell in the loop (so no `;`/`&&`/`|`/redirection).
+Each command also runs with a restricted environment (no API keys or other secrets DevAgent is
+holding are passed through), a timeout, and capped output. Like writes, every command is shown
+(`DevAgent wants to run: <command>`) and confirmed before it runs, unless `--yolo`/`--auto`.
 
 ## Tests
 
