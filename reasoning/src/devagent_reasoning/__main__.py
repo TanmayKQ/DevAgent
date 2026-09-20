@@ -64,9 +64,15 @@ def _run_task(task_envelope: dict, envelopes: Iterator[tuple[str, Any]], stdout,
 
         while "__interrupt__" in result:
             call_payload = result["__interrupt__"][0].value
-            _write(stdout, make_envelope("tool_call", call_payload, session_id))
-            tool_result_payload = _await_tool_result(envelopes, call_payload["call_id"], stdout)
-            result = graph.invoke(Command(resume=tool_result_payload), config=config)
+            if call_payload["name"] == "ask_user":
+                question = call_payload["arguments"]["question"]
+                _write(stdout, make_envelope("ask_user", {"question": question}, session_id))
+                answer = _await_ask_user_response(envelopes, stdout)
+                resume_payload: dict[str, Any] = {"ok": True, "result": {"answer": answer}}
+            else:
+                _write(stdout, make_envelope("tool_call", call_payload, session_id))
+                resume_payload = _await_tool_result(envelopes, call_payload["call_id"], stdout)
+            result = graph.invoke(Command(resume=resume_payload), config=config)
 
         _write(stdout, make_envelope("final_answer", {"summary": result.get("final_answer") or ""}, session_id))
     except Exception as exc:  # noqa: BLE001 - a task failure must become an error envelope, never a crash (NFR1)
@@ -89,6 +95,21 @@ def _await_tool_result(envelopes: Iterator[tuple[str, Any]], call_id: str, stdou
             continue
         # Ignore anything else (e.g. a stale tool_result) while awaiting this specific call.
     raise RuntimeError("stdin closed while awaiting a tool_result")
+
+
+def _await_ask_user_response(envelopes: Iterator[tuple[str, Any]], stdout) -> str:
+    for kind, item in envelopes:
+        if kind == "error":
+            _write(stdout, item)
+            continue
+        envelope = item
+        if envelope["type"] == "ask_user_response":
+            return envelope["payload"]["answer"]
+        if envelope["type"] == "ping":
+            _write(stdout, make_envelope("pong", {"in_reply_to": envelope["id"]}, envelope["session_id"]))
+            continue
+        # Ignore anything else (e.g. a stale message) while awaiting this specific answer.
+    raise RuntimeError("stdin closed while awaiting an ask_user_response")
 
 
 def _iter_envelopes(stdin, registry: SchemaRegistry) -> Iterator[tuple[str, Any]]:

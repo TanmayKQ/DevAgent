@@ -101,3 +101,38 @@ def test_gives_up_after_max_iterations():
     assert "__interrupt__" not in result
     assert result["final_answer"] == "Stopped: reached max iterations before producing a final answer."
     assert ("reflecting", {"decision": "stop_max_iterations"}) in events
+
+
+def test_ask_user_uses_the_same_interrupt_resume_contract_as_a_tool_call():
+    # graph.py has no ask_user-specific branching at all — __main__.py is the only place that
+    # tells ask_user apart from a real tool, purely by checking the interrupted call's `name`.
+    # This test locks in that the interrupt payload shape and the resume shape are exactly the
+    # same as any other tool, which is what makes that __main__.py-only routing possible.
+    responses = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "ask_user", "args": {"question": "Tabs or spaces?"}, "id": "call_1", "type": "tool_call"}
+            ],
+        ),
+        AIMessage(content="Using spaces, as you said."),
+    ]
+    model = FakeMessagesListChatModel(responses=responses)
+    notify, events = _notifier()
+    graph = build_graph(model, notify, checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "t-ask"}}
+
+    result = graph.invoke(initial_state("set up formatting", "/fake/repo", 10), config=config)
+    assert "__interrupt__" in result
+    call = result["__interrupt__"][0].value
+    assert call == {"call_id": "call_1", "name": "ask_user", "arguments": {"question": "Tabs or spaces?"}}
+    assert ("asking_user", {"name": "ask_user", "arguments": {"question": "Tabs or spaces?"}}) in events
+
+    result = graph.invoke(
+        Command(resume={"call_id": "call_1", "ok": True, "result": {"answer": "spaces"}}),
+        config=config,
+    )
+    assert "__interrupt__" not in result
+    assert result["final_answer"] == "Using spaces, as you said."
+    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert any('"answer": "spaces"' in m.content for m in tool_messages)

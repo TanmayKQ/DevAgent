@@ -10,6 +10,7 @@ export type MessageType =
   | "tool_result"
   | "plan_update"
   | "ask_user"
+  | "ask_user_response"
   | "final_answer"
   | "error"
   | "ping"

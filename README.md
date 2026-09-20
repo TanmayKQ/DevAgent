@@ -9,15 +9,16 @@ See `DevAgent_PRD.md` for the full spec and `context.md` for current project sta
 
 ## Status
 
-**M0-M3 are done** (protocol skeleton, read-only agent, write path, command execution). The
-harness runs a full plan -> act -> observe -> reflect -> finish loop against a real repository
-using `read_file`, `list_dir`, `search_code`, `write_file`, `apply_patch`, and `run_command`,
-backed by Gemini. Every write and every command is shown to the user and requires confirmation
-by default (`--yolo`/`--auto` to skip the prompt). `run_command` only ever runs a fixed allowlist
-of commands (test runners, builds, type-checks, read-only git), with no shell, a restricted
-environment, a timeout, and capped output. Every message is schema-validated and audit-logged.
-See `context.md` for the milestone checklist and what's next (M4: the full loop against a
-benchmark task set).
+**M0-M4 are done** (protocol skeleton, read-only agent, write path, command execution, full
+loop + benchmark). The harness runs a full plan -> act -> observe -> reflect -> finish loop
+against a real repository using `read_file`, `list_dir`, `search_code`, `write_file`,
+`apply_patch`, `run_command`, and `ask_user`, backed by Gemini. Every write and every command is
+shown to the user and requires confirmation by default (`--yolo`/`--auto` to skip the prompt).
+`run_command` only ever runs a fixed allowlist of commands (test runners, builds, type-checks,
+read-only git), with no shell, a restricted environment, a timeout, and capped output. Every
+message is schema-validated and audit-logged. A 17-task benchmark (`benchmark/`) exercises the
+whole loop against two fixture repos with real bugs. See `context.md` for the milestone
+checklist and what's next (M5: hardening, packaging, docs, demo).
 
 ## Setup
 
@@ -78,6 +79,31 @@ Each command also runs with a restricted environment (no API keys or other secre
 holding are passed through), a timeout, and capped output. Like writes, every command is shown
 (`DevAgent wants to run: <command>`) and confirmed before it runs, unless `--yolo`/`--auto`.
 
+### Asking you a question (`ask_user`)
+
+When the task is genuinely ambiguous or the agent has tried multiple reasonable fixes and is
+still stuck, it can pause and ask a free-text question instead of guessing indefinitely:
+
+```
+DevAgent asks: Should I use tabs or spaces?
+>
+```
+
+Your typed answer becomes its next observation and it continues the task. Unlike write/command
+confirmations, this isn't a risk gate (asking has no side effect), so it always happens — it's
+never skipped by `--yolo`/`--auto`.
+
+## Benchmark
+
+`benchmark/` has 17 hand-authored tasks (real bugs to fix, a function to add, read-only
+questions, and two deliberately ambiguous tasks) across two small fixture repos, run end-to-end
+through the real CLI with an automated pass/fail check per task. See `benchmark/README.md`.
+
+```bash
+node benchmark/run.js --fake   # smoke-test the runner, no API key needed
+node benchmark/run.js          # the real scored run — calls Gemini, uses API quota
+```
+
 ## Tests
 
 ```bash
@@ -106,5 +132,7 @@ schemas/     Single source of truth JSON Schemas for the wire protocol AND for e
              arguments (also reused as the LLM's tool-call descriptions). Both packages load
              these exact files (ajv on the TS side, jsonschema on the Python side) so the two
              implementations can't silently drift apart.
+benchmark/   17-task benchmark: fixture repos with real bugs (repos/), task definitions
+             (tasks.json), and the runner (run.js). See benchmark/README.md.
 .devagent/   Runtime output (audit logs). Gitignored.
 ```

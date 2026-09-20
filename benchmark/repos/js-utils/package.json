@@ -1,0 +1,9 @@
+{
+  "name": "js-utils",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Benchmark fixture repo for DevAgent. Intentionally has real bugs and one missing function.",
+  "scripts": {
+    "test": "node test/run_all.js"
+  }
+}

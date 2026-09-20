@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://devagent.dev/schemas/messages/ask_user_response.schema.json",
+  "title": "ask_user_response payload",
+  "description": "The human's free-text reply to an ask_user message.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["answer"],
+  "properties": {
+    "answer": { "type": "string" }
+  }
+}

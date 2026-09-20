@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://devagent.dev/schemas/messages/ask_user.schema.json",
+  "title": "ask_user payload",
+  "description": "Sent by the reasoning loop when it needs a free-text answer from the human before it can continue. Paired with ask_user_response, the same way tool_call is paired with tool_result.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["question"],
+  "properties": {
+    "question": { "type": "string", "minLength": 1 }
+  }
+}

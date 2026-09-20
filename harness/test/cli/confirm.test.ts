@@ -83,4 +83,26 @@ describe("createConfirmChannel", () => {
     expect(written.join("")).toContain("Proceed? [y/N] ");
     channel.dispose();
   });
+
+  describe("askText", () => {
+    it("resolves with the raw line typed back, not just true/false", async () => {
+      const channel = createConfirmChannel(inputOf("use spaces please\n"), discardOutput());
+      expect(await channel.askText("> ")).toBe("use spaces please");
+      channel.dispose();
+    });
+
+    it("resolves with an empty string when the stream closes with no answer", async () => {
+      const channel = createConfirmChannel(inputOf(""), discardOutput());
+      expect(await channel.askText("> ")).toBe("");
+      channel.dispose();
+    });
+
+    it("shares the reader with ask() — a mix of ask/askText calls still consume lines in order", async () => {
+      const channel = createConfirmChannel(inputOf("y\nsome answer\nn\n"), discardOutput());
+      expect(await channel.ask("confirm1? ")).toBe(true);
+      expect(await channel.askText("what? ")).toBe("some answer");
+      expect(await channel.ask("confirm2? ")).toBe(false);
+      channel.dispose();
+    });
+  });
 });

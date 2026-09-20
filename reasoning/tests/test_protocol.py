@@ -1,5 +1,6 @@
 import json
 import random
+import shutil
 from pathlib import Path
 
 import pytest
@@ -90,9 +91,46 @@ def test_schema_registry_rejects_unknown_envelope_field():
     assert not result.valid
 
 
-def test_schema_registry_falls_back_to_permissive_validation_for_unmapped_type():
-    # ask_user has no schemas/messages/ask_user.schema.json yet (arrives when M2/M3 need it).
+def test_schema_registry_falls_back_to_permissive_validation_for_unmapped_type(tmp_path):
+    # Every real envelope type now has a dedicated payload schema, so there's no longer a
+    # naturally-unmapped one to test against directly. Build an isolated copy of the schemas
+    # tree with one message schema deliberately removed, to test the fallback mechanism itself
+    # (which stays in place for whenever a future type is added before its schema is written).
+    schemas_copy = tmp_path / "schemas"
+    shutil.copytree(REPO_ROOT / "schemas", schemas_copy)
+    (schemas_copy / "messages" / "pong.schema.json").unlink()
+
+    registry = SchemaRegistry(schemas_copy)
+    envelope = make_envelope("pong", {"anything": "goes"}, "session-1")
+    result = registry.validate_envelope(envelope)
+    assert result.valid, result.errors
+
+
+def test_schema_registry_accepts_valid_ask_user():
     registry = SchemaRegistry(REPO_ROOT / "schemas")
-    envelope = make_envelope("ask_user", {"anything": "goes"}, "session-1")
+    envelope = make_envelope("ask_user", {"question": "Tabs or spaces?"}, "session-1")
+    result = registry.validate_envelope(envelope)
+    assert result.valid, result.errors
+
+
+def test_schema_registry_rejects_ask_user_missing_question():
+    registry = SchemaRegistry(REPO_ROOT / "schemas")
+    envelope = make_envelope("ask_user", {}, "session-1")
+    result = registry.validate_envelope(envelope)
+    assert not result.valid
+
+
+def test_schema_registry_accepts_valid_ask_user_response():
+    registry = SchemaRegistry(REPO_ROOT / "schemas")
+    envelope = make_envelope("ask_user_response", {"answer": "spaces"}, "session-1")
+    result = registry.validate_envelope(envelope)
+    assert result.valid, result.errors
+
+
+def test_schema_registry_accepts_empty_ask_user_response_answer():
+    # An empty string is a valid (if unhelpful) answer — the harness sends this when the input
+    # stream closed with nothing typed. It must not be rejected as "missing".
+    registry = SchemaRegistry(REPO_ROOT / "schemas")
+    envelope = make_envelope("ask_user_response", {"answer": ""}, "session-1")
     result = registry.validate_envelope(envelope)
     assert result.valid, result.errors

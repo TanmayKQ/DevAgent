@@ -41,9 +41,9 @@ describe("validateEnvelope", () => {
     expect(validateEnvelope(envelope).valid).toBe(false);
   });
 
-  it("falls back to permissive validation for a type without a dedicated payload schema", () => {
-    // ask_user has no schemas/messages/ask_user.schema.json yet (arrives when M2/M3 need it).
-    const envelope = createEnvelope("ask_user", { anything: "goes" }, "session-1");
-    expect(validateEnvelope(envelope).valid).toBe(true);
-  });
+  // The "falls back to permissive validation for an unmapped type" case now lives in its own
+  // isolated test file (envelopeFallback.test.ts) — every real type has a dedicated schema as
+  // of M4, so exercising the fallback needs a schemas dir with one deliberately removed, and
+  // envelope.ts's registry is process-wide singleton state that can't be re-initialized here
+  // once this file's beforeAll has already loaded the real schemas.
 });

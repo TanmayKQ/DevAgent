@@ -31,7 +31,7 @@ Full requirements live in `DevAgent_PRD.md` in this same output — read it befo
 - [x] M1 — Read-only agent (`read_file`, `list_dir`, `search_code`)
 - [x] M2 — Write path (`apply_patch`/`write_file` + diff preview/confirm)
 - [x] M3 — Execution (`run_command` + allowlist + sandbox)
-- [ ] M4 — Full plan → act → observe → replan loop on benchmark tasks
+- [x] M4 — Full plan → act → observe → replan loop on benchmark tasks
 - [ ] M5 — Hardening, packaging, docs, demo
 
 Update this checklist as milestones land. Note actual decisions made (library choices, protocol framing format, model provider) below as they're finalized, so future sessions don't re-litigate them.
@@ -147,6 +147,42 @@ too, not just M3.
 coverage, 4 end-to-end `run_command` confirm/decline/`--yolo`/disallowed tests, and 2 multi-step
 regression tests) plus a full rewrite of the `confirm()` test suite — 108 Vitest + 13 pytest
 total, all passing, still no live API key required anywhere.
+
+## Current state — detail (M4)
+
+Two things landed together: `ask_user`, and the 17-task benchmark.
+
+**`ask_user`** closes the "attempt a replan... before giving up and asking the user" half of
+FR5. It's its own envelope type pair (`ask_user`/`ask_user_response`), not routed through
+`tool_call`/`tool_result` — matching the PRD's own message-type list, which already named
+`ask_user` separately. To the LLM it's presented as an ordinary bindable tool (in
+`tools.py`/`schemas/tools/ask_user.schema.json`), so no graph.py changes were needed at all:
+`act`'s `interrupt()` doesn't know or care that this call is special. All the routing is in
+`__main__.py` — it checks the interrupted call's `name`, and if it's `"ask_user"` sends an
+`ask_user` envelope + awaits `ask_user_response` instead of `tool_call`/`tool_result`, then
+translates the human's `{answer}` into the same `{ok:true, result:{...}}` shape every other tool
+result already uses before resuming the graph. `ConfirmChannel` gained `askText()` (free-text,
+not y/n) on the same shared `LineReader`. Never gated by `--yolo` — asking has no side effect to
+skip a confirmation for.
+
+The **benchmark** (`benchmark/`) is 17 tasks across two small, dependency-free fixture repos
+(`repos/js-utils`, `repos/py-utils`) — 12 real bugs to fix, 2 "add a missing function" tasks, 2
+read-only Q&A tasks, and 2 deliberately ambiguous tasks (candidates for `ask_user`, though not
+required to use it — see decisions log). Each fixture repo's tests are split one-file-per-function
+specifically so a task's `verify` step can check just the relevant fix without unrelated
+pre-existing bugs elsewhere in the same repo copy causing a false failure. `run.js` copies the
+task's repo to a fresh temp dir, runs the real built CLI with `--yolo` (unattended — stdin is
+closed immediately so an `ask_user` call can't hang the run), checks the task's `verify`
+condition (`run_command` exit-0, `final_answer_contains`, or `completes`), and writes a
+scorecard + JSON report. Verified by running all 17 in `--fake` mode (scripted responses, no API
+key) — 17/17 passed, confirming the runner's mechanics (copy/spawn/verify/report) work
+correctly; this is not a real capability score, which requires a live-model run against real API
+quota — not yet done as of this writing, pending the user's decision on when to spend it.
+
+14 new tests (schema validation for both new message types, `ConfirmChannel.askText`, a graph
+test proving `ask_user` reuses the exact same interrupt/resume contract as any tool with zero
+graph-side special-casing, and 3 end-to-end CLI-subprocess tests) — 114 Vitest + 18 pytest total,
+all passing.
 
 ## Decisions log
 
@@ -293,6 +329,39 @@ total, all passing, still no live API key required anywhere.
   the whole CLI process alive past when it should exit. Locked in with both a unit-level
   regression test (two answers in one chunk) and a real end-to-end test driving the actual CLI
   through a two-tool-call task. — 2026-09-14
+- **`ask_user` is its own envelope type pair (`ask_user`/`ask_user_response`), not a `tool_call`
+  variant** — the PRD's own protocol message list already names `ask_user` separately from
+  `tool_call`/`tool_result`, and semantically it isn't risk-tiered the way write_file/apply_patch/
+  run_command are (no side effect, never needs `--yolo` gating), so it doesn't belong in the
+  same family as those. It IS still presented to the LLM as an ordinary bindable tool (same
+  `schemas/tools/*.schema.json` mechanism) — the distinction is purely in which wire envelope
+  `__main__.py` chooses to send, decided by checking the interrupted call's `name`. This keeps
+  `graph.py` completely unaware ask_user is special: `act`'s `interrupt()`/resume contract is
+  identical for every tool, real or not, which is what made adding this require zero graph
+  changes. — 2026-09-20
+- **Benchmark fixture repos split their tests one file per function**, not one whole-suite
+  `npm test`/`pytest tests/`. Each fixture repo carries several independent bugs simultaneously
+  (to get enough tasks out of two small repos) — a whole-suite verify command would report
+  failure for a task whose specific bug the agent DID fix, just because a different, unrelated
+  bug elsewhere in the same repo copy was still present. Scoping each task's `verify` to
+  `test/<function>.test.js` / `tests/test_<function>.py` makes each task's pass/fail
+  independent of every other task's state. — 2026-09-20
+- **Benchmark tasks carry hand-scripted `fakeResponses` used only by `run.js --fake`.** This
+  smoke-tests the runner's own mechanics (fixture copy, unattended real-CLI spawn, verify
+  check, report) without an API key or cost, and doing that surfaced real integration issues
+  cheaply (path-jail/allowlist interplay, whether `--yolo` + closed stdin actually avoids
+  hanging on an `ask_user` call). It is explicitly **not** a capability score — the responses
+  are pre-written, not reasoned — that requires a real (non-`--fake`) run against live Gemini,
+  which costs API quota and hasn't been run yet as of this writing; that's the user's call on
+  timing, not something to spend automatically. — 2026-09-20
+- **The runner closes the spawned CLI's stdin immediately (`--yolo` + `child.stdin.end()`)
+  rather than leaving it open unattended.** `--yolo` skips write/command confirmation prompts,
+  but `ask_user` is deliberately never gated by `--yolo` (see above) — without also closing
+  stdin, a task that triggers `ask_user` (scripted or, in a real run, the model's own choice)
+  would sit blocked on a prompt nothing will ever answer until the runner's 3-minute per-task
+  timeout. A closed stdin resolves that prompt to an empty string immediately, per `confirm.ts`'s
+  existing EOF-safe design — this is the runner relying on, not working around, that guarantee.
+  — 2026-09-20
 
 ## Open questions
 

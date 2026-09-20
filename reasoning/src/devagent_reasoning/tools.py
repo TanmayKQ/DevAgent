@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-TOOL_NAMES = ("read_file", "list_dir", "search_code", "write_file", "apply_patch", "run_command")
+TOOL_NAMES = ("read_file", "list_dir", "search_code", "write_file", "apply_patch", "run_command", "ask_user")
 
 
 def load_tool_specs(schemas_dir: Path) -> list[dict[str, Any]]:

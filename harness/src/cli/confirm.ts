@@ -75,13 +75,17 @@ export interface ConfirmChannel {
   /** Prompts on the channel's output and resolves true only for an explicit y/yes
    * (case-insensitive) — anything else, including empty input or a closed stream, is "no". */
   ask(question: string): Promise<boolean>;
+  /** Prompts on the channel's output and resolves with the raw line typed back (for ask_user,
+   * which wants a free-text answer, not a yes/no) — empty string if the stream closed with no
+   * answer, same "absence is not an error" spirit as ask(). */
+  askText(question: string): Promise<string>;
   /** Releases the underlying input stream so the process can exit naturally. Call once, after
-   * the last ask(). */
+   * the last ask()/askText(). */
   dispose(): void;
 }
 
-/** Create exactly one channel per session and reuse it for every confirmation in that session
- * (see the class doc above for why). */
+/** Create exactly one channel per session and reuse it for every prompt in that session (see
+ * the class doc above for why) — confirmations and free-text questions share the same reader. */
 export function createConfirmChannel(
   input: NodeJS.ReadableStream = process.stdin,
   output: NodeJS.WritableStream = process.stdout,
@@ -92,6 +96,11 @@ export function createConfirmChannel(
       output.write(question);
       const line = await reader.readLine();
       return line !== null && /^y(es)?$/i.test(line.trim());
+    },
+    async askText(question: string): Promise<string> {
+      output.write(question);
+      const line = await reader.readLine();
+      return line ?? "";
     },
     dispose(): void {
       reader.dispose();

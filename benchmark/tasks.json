@@ -1,0 +1,338 @@
+{
+  "tasks": [
+    {
+      "id": "js-capitalize-empty",
+      "repo": "js-utils",
+      "task": "Fix capitalize() in src/strings.js so it doesn't crash on an empty string — it should return an empty string in that case instead of throwing.",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "node", "args": ["test/capitalize.test.js"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/strings.js" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/strings.js",
+              "old_string": "function capitalize(str) {\n  return str[0].toUpperCase() + str.slice(1);\n}",
+              "new_string": "function capitalize(str) {\n  if (str.length === 0) return \"\";\n  return str[0].toUpperCase() + str.slice(1);\n}"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "node", "args": ["test/capitalize.test.js"] } } },
+        { "text": "Fixed capitalize() to return an empty string for empty input instead of throwing." }
+      ]
+    },
+    {
+      "id": "js-truncate-ellipsis",
+      "repo": "js-utils",
+      "task": "Fix truncate(str, maxLen) in src/strings.js so that when it truncates a string it appends '...' to the result. It currently truncates without adding the ellipsis.",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "node", "args": ["test/truncate.test.js"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/strings.js" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/strings.js",
+              "old_string": "str.slice(0, maxLen);",
+              "new_string": "str.slice(0, maxLen) + \"...\";"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "node", "args": ["test/truncate.test.js"] } } },
+        { "text": "Fixed truncate() to append '...' when the string is actually truncated." }
+      ]
+    },
+    {
+      "id": "js-count-vowels-case",
+      "repo": "js-utils",
+      "task": "Fix countVowels(str) in src/strings.js — it should count vowels regardless of case (e.g. countVowels('AEIOU') should be 5), but it currently only counts lowercase vowels.",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "node", "args": ["test/countVowels.test.js"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/strings.js" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/strings.js",
+              "old_string": "if (vowels.includes(ch)) count++;",
+              "new_string": "if (vowels.includes(ch.toLowerCase())) count++;"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "node", "args": ["test/countVowels.test.js"] } } },
+        { "text": "Fixed countVowels() to be case-insensitive." }
+      ]
+    },
+    {
+      "id": "js-clamp",
+      "repo": "js-utils",
+      "task": "Fix clamp(n, min, max) in src/math.js so it properly clamps n to be within [min, max]. It currently returns the wrong value.",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "node", "args": ["test/clamp.test.js"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/math.js" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/math.js",
+              "old_string": "return Math.min(n, min, max);",
+              "new_string": "return Math.min(Math.max(n, min), max);"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "node", "args": ["test/clamp.test.js"] } } },
+        { "text": "Fixed clamp() to correctly bound n between min and max." }
+      ]
+    },
+    {
+      "id": "js-is-prime",
+      "repo": "js-utils",
+      "task": "Fix isPrime(n) in src/math.js so it correctly returns false for 0, 1, and negative numbers. It currently incorrectly returns true for those.",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "node", "args": ["test/isPrime.test.js"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/math.js" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/math.js",
+              "old_string": "function isPrime(n) {\n  for (let i = 2; i < n; i++) {",
+              "new_string": "function isPrime(n) {\n  if (n < 2) return false;\n  for (let i = 2; i < n; i++) {"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "node", "args": ["test/isPrime.test.js"] } } },
+        { "text": "Fixed isPrime() to reject numbers below 2." }
+      ]
+    },
+    {
+      "id": "js-pad-left",
+      "repo": "js-utils",
+      "task": "Add a new function padLeft(str, len, char = ' ') to src/format.js, exported alongside the existing padRight. It should left-pad str with char until it reaches length len (or return it unchanged if already that long or longer).",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "node", "args": ["test/padLeft.test.js"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/format.js" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/format.js",
+              "old_string": "module.exports = { padRight };",
+              "new_string": "function padLeft(str, len, char = \" \") {\n  str = String(str);\n  while (str.length < len) {\n    str = char + str;\n  }\n  return str;\n}\n\nmodule.exports = { padRight, padLeft };"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "node", "args": ["test/padLeft.test.js"] } } },
+        { "text": "Added padLeft() to src/format.js and exported it." }
+      ]
+    },
+    {
+      "id": "js-math-exports-readonly",
+      "repo": "js-utils",
+      "task": "How many functions does src/math.js export, and what are their names? Answer in your final response.",
+      "maxIterations": 6,
+      "verify": { "type": "final_answer_contains", "all": ["clamp", "average", "isprime"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/math.js" } } },
+        { "text": "src/math.js exports 3 functions: clamp, average, and isPrime." }
+      ]
+    },
+    {
+      "id": "js-test-file-count-readonly",
+      "repo": "js-utils",
+      "task": "How many .test.js files are in the test/ directory of this repo? Answer with just the number in your final response.",
+      "maxIterations": 6,
+      "verify": { "type": "final_answer_contains", "all": ["6"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "list_dir", "args": { "path": "test" } } },
+        { "text": "There are 6 .test.js files in the test/ directory." }
+      ]
+    },
+    {
+      "id": "js-ambiguous-improve",
+      "repo": "js-utils",
+      "task": "Improve the format.js module.",
+      "maxIterations": 10,
+      "verify": { "type": "completes" },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/format.js" } } },
+        {
+          "tool_call": {
+            "name": "ask_user",
+            "args": {
+              "question": "\"Improve format.js\" is vague — is there a specific function or behavior you'd like changed, or should I add input validation and comments?"
+            }
+          }
+        },
+        { "text": "Based on your guidance, I added input validation to padRight." }
+      ]
+    },
+    {
+      "id": "py-title-case",
+      "repo": "py-utils",
+      "task": "Fix title_case(s) in src/strutils.py so it capitalizes every word, not just the first one (e.g. title_case('hello world') should return 'Hello World').",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "pytest", "args": ["tests/test_title_case.py"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/strutils.py" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/strutils.py",
+              "old_string": "return s.capitalize()",
+              "new_string": "return \" \".join(word.capitalize() for word in s.split(\" \"))"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "pytest", "args": ["tests/test_title_case.py"] } } },
+        { "text": "Fixed title_case() to capitalize every word." }
+      ]
+    },
+    {
+      "id": "py-dedupe-order",
+      "repo": "py-utils",
+      "task": "Fix dedupe(items) in src/strutils.py so it removes duplicates while preserving the order of first occurrence (e.g. dedupe([3,1,3,2,1]) should return [3,1,2]). It currently uses set(), which loses ordering.",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "pytest", "args": ["tests/test_dedupe.py"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/strutils.py" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/strutils.py",
+              "old_string": "return list(set(items))",
+              "new_string": "seen = set()\n    result = []\n    for item in items:\n        if item not in seen:\n            seen.add(item)\n            result.append(item)\n    return result"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "pytest", "args": ["tests/test_dedupe.py"] } } },
+        { "text": "Fixed dedupe() to preserve first-occurrence order." }
+      ]
+    },
+    {
+      "id": "py-is-palindrome",
+      "repo": "py-utils",
+      "task": "Fix is_palindrome(s) in src/strutils.py so it ignores case and spaces when checking (e.g. is_palindrome('A man a plan a canal Panama') should be True). It currently does a strict character-by-character comparison.",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "pytest", "args": ["tests/test_is_palindrome.py"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/strutils.py" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/strutils.py",
+              "old_string": "return s == s[::-1]",
+              "new_string": "normalized = s.lower().replace(\" \", \"\")\n    return normalized == normalized[::-1]"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "pytest", "args": ["tests/test_is_palindrome.py"] } } },
+        { "text": "Fixed is_palindrome() to ignore case and spaces." }
+      ]
+    },
+    {
+      "id": "py-gcd",
+      "repo": "py-utils",
+      "task": "Fix gcd(a, b) in src/mathutils.py — it has an off-by-one bug and returns a value that's 1 too high (e.g. gcd(12, 8) should be 4, not 5).",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "pytest", "args": ["tests/test_gcd.py"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/mathutils.py" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": { "path": "src/mathutils.py", "old_string": "return a + 1", "new_string": "return a" }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "pytest", "args": ["tests/test_gcd.py"] } } },
+        { "text": "Fixed the off-by-one bug in gcd()." }
+      ]
+    },
+    {
+      "id": "py-flatten",
+      "repo": "py-utils",
+      "task": "Fix flatten(nested) in src/mathutils.py so it fully flattens arbitrarily nested lists into a single flat list (e.g. flatten([1, [2, 3], [4, [5, 6]]]) should return [1, 2, 3, 4, 5, 6]). It currently keeps nested lists nested.",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "pytest", "args": ["tests/test_flatten.py"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/mathutils.py" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/mathutils.py",
+              "old_string": "result.append(flatten(item))",
+              "new_string": "result.extend(flatten(item))"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "pytest", "args": ["tests/test_flatten.py"] } } },
+        { "text": "Fixed flatten() to fully flatten nested lists by extending instead of appending." }
+      ]
+    },
+    {
+      "id": "py-is-even",
+      "repo": "py-utils",
+      "task": "Add a new function is_even(n) to src/mathutils.py that returns True if n is even and False otherwise. There's already a test file at tests/test_is_even.py describing the expected behavior — check it first.",
+      "maxIterations": 8,
+      "verify": { "type": "run_command", "command": "pytest", "args": ["tests/test_is_even.py"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "tests/test_is_even.py" } } },
+        { "tool_call": { "name": "read_file", "args": { "path": "src/mathutils.py" } } },
+        {
+          "tool_call": {
+            "name": "apply_patch",
+            "args": {
+              "path": "src/mathutils.py",
+              "old_string": "    return result",
+              "new_string": "    return result\n\n\ndef is_even(n: int) -> bool:\n    return n % 2 == 0"
+            }
+          }
+        },
+        { "tool_call": { "name": "run_command", "args": { "command": "pytest", "args": ["tests/test_is_even.py"] } } },
+        { "text": "Added is_even() to src/mathutils.py." }
+      ]
+    },
+    {
+      "id": "py-dedupe-bug-explain-readonly",
+      "repo": "py-utils",
+      "task": "Before making any changes: look at dedupe() in src/strutils.py and explain in your final answer what's wrong with its current implementation.",
+      "maxIterations": 6,
+      "verify": { "type": "final_answer_contains", "all": ["order"] },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/strutils.py" } } },
+        {
+          "text": "dedupe() currently uses list(set(items)), which removes duplicates but does not preserve the original order of first occurrence, since sets in Python don't maintain insertion order."
+        }
+      ]
+    },
+    {
+      "id": "py-ambiguous-error-handling",
+      "repo": "py-utils",
+      "task": "Improve error handling in mathutils.py.",
+      "maxIterations": 10,
+      "verify": { "type": "completes" },
+      "fakeResponses": [
+        { "tool_call": { "name": "read_file", "args": { "path": "src/mathutils.py" } } },
+        {
+          "tool_call": {
+            "name": "ask_user",
+            "args": {
+              "question": "What kind of error handling would you like in mathutils.py — e.g. type checks, or handling non-list input to flatten?"
+            }
+          }
+        },
+        { "text": "Noted your guidance for a future change; I didn't modify the file this run." }
+      ]
+    }
+  ]
+}

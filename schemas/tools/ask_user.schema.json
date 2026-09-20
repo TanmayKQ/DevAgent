@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://devagent.dev/schemas/tools/ask_user.schema.json",
+  "title": "ask_user",
+  "description": "Pause and ask the human a free-text question. Use this only when you're genuinely stuck (the task is ambiguous between reasonable interpretations, or you've tried multiple reasonable fixes and still can't succeed) — not as a shortcut for something you could find out yourself with read_file/list_dir/search_code. This is not a tool call in the usual sense: it never touches the repository, requires no confirmation, and the human's reply comes back as your next observation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["question"],
+  "properties": {
+    "question": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A specific, answerable question — explain what you've tried or what's ambiguous, not just \"what should I do?\"."
+    }
+  }
+}

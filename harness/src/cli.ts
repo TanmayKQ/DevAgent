@@ -278,6 +278,14 @@ async function runTask(
         proc.send(createEnvelope("tool_result", result, sessionId));
         return;
       }
+      case "ask_user": {
+        const payload = envelope.payload as { question: string };
+        console.log(`\nDevAgent asks: ${payload.question}`);
+        const answer = await getConfirmChannel().askText("> ");
+        console.log();
+        proc.send(createEnvelope("ask_user_response", { answer }, sessionId));
+        return;
+      }
       case "final_answer": {
         const payload = envelope.payload as { summary: string };
         console.log(`\nDevAgent: ${payload.summary}`);
