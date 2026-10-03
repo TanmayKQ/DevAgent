@@ -32,7 +32,7 @@ Full requirements live in `DevAgent_PRD.md` in this same output — read it befo
 - [x] M2 — Write path (`apply_patch`/`write_file` + diff preview/confirm)
 - [x] M3 — Execution (`run_command` + allowlist + sandbox)
 - [x] M4 — Full plan → act → observe → replan loop on benchmark tasks
-- [ ] M5 — Hardening, packaging, docs, demo
+- [~] M5 — Hardening, packaging, docs, demo (built; see below — one M4 item still unproven)
 
 Update this checklist as milestones land. Note actual decisions made (library choices, protocol framing format, model provider) below as they're finalized, so future sessions don't re-litigate them.
 
@@ -183,6 +183,38 @@ quota — not yet done as of this writing, pending the user's decision on when t
 test proving `ask_user` reuses the exact same interrupt/resume contract as any tool with zero
 graph-side special-casing, and 3 end-to-end CLI-subprocess tests) — 114 Vitest + 18 pytest total,
 all passing.
+
+## Current state — detail (M5, plus the first live run)
+
+**First live Gemini run (do this before trusting M4).** Running against the real model for the first
+time found bugs that fake-mode could never catch: `npm`/`npx` never launched on Windows (`.cmd`
+shims: `spawn` with `shell:false` gets ENOENT, and Node >= 20.12 refuses to spawn `.cmd` without a
+shell — fixed by running the wrapped `npm-cli.js` under the current node binary, keeping the
+no-shell guarantee); a failed spawn crashed the whole CLI instead of becoming a `tool_result`
+error; the default model `gemini-2.5-flash` was retired (now `gemini-3.8-flash`); and LLM rate
+limits killed tasks (added `retry.py`: honors the provider's retry hint, bounded attempts, injectable
+sleep; fails fast on hard quotas). A single live task (`js-clamp`) passed.
+
+**Still unproven:** the PRD's >=70% benchmark target. The user's free Gemini key allows 20
+requests/day/model and was exhausted, so the full 17-task live run did NOT complete — only
+fake-mode (17/17, scripted) and one live task have passed. Needs a key with billing (est. well
+under $1 for 17 tasks) or several days of free quota. `node benchmark/run.js` is ready.
+
+**M5 built:** packaging, `devagent doctor`, crash recovery, session audit records + `replay`, docs.
+- `npm run setup` (`scripts/setup.js`) creates `.venv`, pip-installs `reasoning[dev]`, creates `.env`.
+  `resolvePython`: `--python`/`DEVAGENT_PYTHON` > `.venv` > `python`. Verified from scratch (~100s),
+  and the CLI picks the venv up with `DEVAGENT_PYTHON` unset.
+- `devagent doctor`: Node >= 18, Python >= 3.10, reasoning package importable, API key present
+  (never printed), schemas found — each failure prints a fix.
+- Crash recovery: if the Python process dies mid-task the CLI now exits 1 with its last stderr and a
+  doctor hint instead of hanging forever (`exit` handler, guarded by a `finished` flag so a normal
+  shutdown isn't reported as a crash).
+- Audit log: `session start`/`session end` records; `run` prints the session id; `devagent replay
+  <id|path|latest>` renders a transcript. Read-only inspection only — live resume is NOT built.
+- Docs: README rewritten around the quickstart, `docs/ARCHITECTURE.md`, `docs/DEMO.md` (script only;
+  the demo video itself is not recorded).
+
+Not done: recording the demo video; live session resume (stretch); the real benchmark score.
 
 ## Decisions log
 
@@ -363,9 +395,23 @@ all passing.
   existing EOF-safe design — this is the runner relying on, not working around, that guarantee.
   — 2026-09-20
 
+- **Packaging: one `npm run setup` command that builds a private `.venv`** (user's choice from
+  three options). Chosen over two separate installs (worst first-run, wrong-Python errors) and a
+  PyInstaller binary (LangChain/LangGraph/Google SDKs make it heavy and per-OS). The CLI resolves
+  Python as explicit > `.venv` > `python`, so users never choose an interpreter. — 2026-10-03
+- **Windows `npm`/`npx` are launched via `node <npm-cli.js>`, not by loosening the no-shell rule.**
+  Re-adding a shell to start `.cmd` shims would have undone the injection protection that is the
+  point of `run_command`'s design. Found only by a live run — fake-mode never launches npm. — 2026-10-03
+- **A hard API quota must fail fast, not retry.** A 16-hour retry hint was first treated like a
+  per-minute limit and burned 15 minutes per task. Hints longer than the retry cap now raise a clear
+  "quota exhausted" error immediately. — 2026-10-03
+- **A reasoning-loop crash must never hang the CLI.** Only `error`/`final_answer` used to settle the
+  run; a Python process dying silently left it waiting forever. The `exit` handler now settles with
+  the process's last stderr — excluded after normal completion so shutdown isn't misreported. — 2026-10-03
+
 ## Open questions
 
-- Final packaging strategy: single `npm` package that shells out to a bundled Python venv, vs. two separate installs the user wires together, vs. bundling the Python side as a PyInstaller binary.
+- (Resolved 2026-10-03: packaging = one-command setup with an auto-used `.venv`. See decisions log.)
 - How session resume should work beyond read-only replay (stretch goal per PRD).
 
 ## How to use this file

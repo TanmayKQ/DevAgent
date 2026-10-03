@@ -6,6 +6,10 @@ import { dirname, join, resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
 import { initSchemas, createEnvelope } from "./protocol/envelope.js";
 import { findRepoRoot } from "./config/repoPaths.js";
+import { resolvePython } from "./config/python.js";
+import { runDoctor, formatChecks } from "./cli/doctor.js";
+import { parseLog, formatReplay, resolveLogPath } from "./cli/replay.js";
+import { readFileSync } from "node:fs";
 import { PythonReasoningProcess } from "./process/pythonProcess.js";
 import { AuditLogger } from "./logging/auditLog.js";
 import {
@@ -31,14 +35,41 @@ program
   .name("devagent")
   .description("Autonomous CLI coding assistant")
   .option("--verbose", "echo raw protocol traffic to stderr", false)
-  .option("--python <command>", "python interpreter to use", process.env.DEVAGENT_PYTHON || "python");
+  .option("--python <command>", "python interpreter to use (default: the .venv from `npm run setup`, else `python`)");
+
+program
+  .command("doctor")
+  .description("check that Node, Python, the reasoning loop, and your API key are set up correctly")
+  .action(() => {
+    const opts = program.opts<{ python?: string }>();
+    const root = findRepoRoot(__dirname);
+    const python = resolvePython(opts.python ?? process.env.DEVAGENT_PYTHON, root);
+    const checks = runDoctor(root, python, process.env);
+    console.log(formatChecks(checks));
+    process.exitCode = checks.every((c) => c.ok) ? 0 : 1;
+  });
+
+program
+  .command("replay <session>")
+  .description("print a past session's audit log as a readable transcript (a session id, a .jsonl path, or \"latest\")")
+  .action((session: string) => {
+    try {
+      const logsDir = join(findRepoRoot(__dirname), ".devagent", "logs");
+      const path = resolveLogPath(logsDir, session);
+      console.log(`Replaying ${path}\n`);
+      console.log(formatReplay(parseLog(readFileSync(path, "utf8"))));
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exitCode = 1;
+    }
+  });
 
 program
   .command("selftest")
   .description("spawn the reasoning loop and verify the ping/pong handshake")
   .action(async () => {
-    const opts = program.opts<{ verbose: boolean; python: string }>();
-    await runSelftest(opts.python, opts.verbose);
+    const opts = program.opts<{ verbose: boolean; python?: string }>();
+    await runSelftest(resolvePython(opts.python ?? process.env.DEVAGENT_PYTHON, findRepoRoot(__dirname)), opts.verbose);
   });
 
 async function runSelftest(pythonCmd: string, verbose: boolean): Promise<void> {
@@ -103,7 +134,7 @@ program
       task: string,
       cmdOpts: { repo: string; model?: string; maxIterations: string; yolo: boolean; auto: boolean },
     ) => {
-      const opts = program.opts<{ verbose: boolean; python: string }>();
+      const opts = program.opts<{ verbose: boolean; python?: string }>();
       const maxIterations = Number.parseInt(cmdOpts.maxIterations, 10);
       if (!Number.isInteger(maxIterations) || maxIterations < 1) {
         console.error(`--max-iterations must be a positive integer, got: ${cmdOpts.maxIterations}`);
@@ -115,7 +146,7 @@ program
         cmdOpts.repo,
         maxIterations,
         cmdOpts.model,
-        opts.python,
+        resolvePython(opts.python ?? process.env.DEVAGENT_PYTHON, findRepoRoot(__dirname)),
         opts.verbose,
         cmdOpts.yolo || cmdOpts.auto,
       );
@@ -151,11 +182,16 @@ async function runTask(
     cwd: join(devAgentRoot, "reasoning", "src"),
   });
 
+  logger.log("internal", { note: "session start", task, repo: targetRepoRoot, model: model ?? "default", autoApprove, maxIterations });
+  console.log(`session ${sessionId}  (replay later with: devagent replay ${sessionId})`);
+
   proc.on("send", (envelope: Envelope) => {
     logger.log("to_python", envelope);
     if (verbose) process.stderr.write(`-> ${JSON.stringify(envelope)}\n`);
   });
+  let stderrTail = "";
   proc.on("stderr", (text: string) => {
+    stderrTail = (stderrTail + text).slice(-800);
     if (verbose) process.stderr.write(`[python:stderr] ${text}`);
   });
 
@@ -181,6 +217,19 @@ async function runTask(
   proc.on("error", (err: Error) => {
     logger.log("internal", { note: "process error", message: err.message });
     console.error("Error:", err.message);
+    settle(1);
+  });
+  // If the reasoning loop dies mid-task nothing else would ever settle `done` — the CLI would
+  // hang forever. A normal shutdown (after the task finished) is excluded via `finished`.
+  let finished = false;
+  proc.on("exit", (code: number | null) => {
+    if (finished) return;
+    logger.log("internal", { note: "reasoning loop exited unexpectedly", code });
+    console.error(`
+The reasoning loop exited unexpectedly (code ${code}).`);
+    if (stderrTail.trim()) console.error(`Its last output:
+${stderrTail.trim()}`);
+    console.error("Run `devagent doctor` to check your setup.");
     settle(1);
   });
 
@@ -318,6 +367,8 @@ async function runTask(
   );
 
   process.exitCode = await done;
+  finished = true;
+  logger.log("internal", { note: "session end", exitCode: process.exitCode });
   confirmChannel?.dispose();
   await proc.stop();
   await logger.close();

@@ -23,7 +23,6 @@ const { join } = require("node:path");
 const BENCHMARK_ROOT = __dirname;
 const DEVAGENT_ROOT = join(BENCHMARK_ROOT, "..");
 const CLI_PATH = join(DEVAGENT_ROOT, "harness", "dist", "cli.js");
-const PYTHON_CMD = process.env.DEVAGENT_PYTHON || "python";
 const PER_TASK_TIMEOUT_MS = 900000; // live runs on a rate-limited tier spend most of their time waiting
 
 function parseArgs() {
@@ -56,7 +55,7 @@ function runDevAgent(task, repoDir, opts) {
     ];
     if (opts.model) args.push("--model", opts.model);
 
-    const env = { ...process.env, DEVAGENT_PYTHON: PYTHON_CMD };
+    const env = { ...process.env };
     if (opts.fake) {
       const fakeScriptPath = join(repoDir, "..", "fake-responses.json");
       writeFileSync(fakeScriptPath, JSON.stringify(task.fakeResponses || []));

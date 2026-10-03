@@ -8,6 +8,9 @@
   "scripts": {
     "build": "npm run build -w harness",
     "test": "npm run test -w harness",
-    "selftest": "npm run selftest -w harness"
+    "selftest": "npm run selftest -w harness",
+    "setup": "node scripts/setup.js",
+    "doctor": "node harness/dist/cli.js doctor",
+    "devagent": "node harness/dist/cli.js"
   }
 }
