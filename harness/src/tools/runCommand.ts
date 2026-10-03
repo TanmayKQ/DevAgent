@@ -1,7 +1,23 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { prepareRunCommand, type RunCommandArgs, type CommandPlan } from "./prepareRunCommand.js";
 
 export type { RunCommandArgs };
+
+/**
+ * On Windows, `npm`/`npx` are `.cmd` shims, which `spawn(..., {shell:false})` can't launch (ENOENT)
+ * and which Node >= 20.12 refuses to spawn without a shell at all (a deliberate security
+ * hardening). Re-introducing a shell would undo the no-shell guarantee, so instead run the
+ * script the shim wraps directly under the node binary that's already running us.
+ */
+function resolveLaunch(command: string, args: string[]): { command: string; args: string[] } {
+  if (process.platform === "win32" && (command === "npm" || command === "npx")) {
+    const cli = join(dirname(process.execPath), "node_modules", "npm", "bin", `${command}-cli.js`);
+    if (existsSync(cli)) return { command: process.execPath, args: [cli, ...args] };
+  }
+  return { command, args };
+}
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 256 * 1024;
@@ -96,7 +112,8 @@ export async function executePlan(plan: CommandPlan, timeoutMs = DEFAULT_TIMEOUT
     let settled = false;
     let timedOut = false;
 
-    const child = spawn(plan.command, plan.args, {
+    const launch = resolveLaunch(plan.command, plan.args);
+    const child = spawn(launch.command, launch.args, {
       cwd: plan.safeCwd,
       env: buildRestrictedEnv(),
       shell: false,

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "../../src/tools/runCommand.js";
@@ -61,6 +61,18 @@ describe("runCommand", () => {
     expect(result.timedOut).toBe(true);
     expect(elapsed).toBeLessThan(10000); // proves it was actually killed, not left to run the full 30s
   }, 15000);
+
+  it("can actually launch npm (a .cmd shim on Windows that plain spawn can't start)", async () => {
+    repoRoot = mkdtempSync(join(tmpdir(), "devagent-run-"));
+    writeFileSync(
+      join(repoRoot, "package.json"),
+      JSON.stringify({ name: "t", version: "1.0.0", scripts: { hello: "node -e \"console.log('npm-ran-ok')\"" } }),
+    );
+    const result = await runCommand(repoRoot, { command: "npm", args: ["run", "hello"] });
+    // The original bug was `spawn npm ENOENT` — npm never launched at all.
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("npm-ran-ok");
+  }, 30000);
 
   it("rejects a disallowed command before ever spawning anything", async () => {
     repoRoot = mkdtempSync(join(tmpdir(), "devagent-run-"));

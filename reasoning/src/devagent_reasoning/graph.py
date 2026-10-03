@@ -17,6 +17,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import interrupt
 
+from .retry import invoke_with_retry
+
 SYSTEM_PROMPT = (
     "You are DevAgent, an autonomous coding assistant working in a repository via read_file, "
     "list_dir, search_code, write_file, apply_patch, run_command, and ask_user. Read before you "
@@ -61,14 +63,15 @@ class AgentState(TypedDict):
     final_answer: Optional[str]
 
 
-def build_graph(model: Runnable, notify: NotifyFn, checkpointer=None):
+def build_graph(model: Runnable, notify: NotifyFn, checkpointer=None, sleep=None):
     """`model` must already have tools bound (model.invoke(messages) -> AIMessage). Injecting
     it as a plain Runnable (rather than constructing a provider client in here) is what lets
     tests pass a scripted fake model instead of ever calling a real LLM API (NFR5)."""
 
     def plan(state: AgentState) -> dict:
         notify("planning", {"iteration": state["iterations"]})
-        ai_message = model.invoke(state["messages"])
+        retry_kwargs = {"sleep": sleep} if sleep else {}
+        ai_message = invoke_with_retry(lambda: model.invoke(state["messages"]), notify, **retry_kwargs)
         # Notify here, not in `act`: a node with an interrupt() re-runs everything before
         # the interrupt on resume, so a notify() placed in `act` would fire twice per call.
         if isinstance(ai_message, AIMessage) and ai_message.tool_calls:

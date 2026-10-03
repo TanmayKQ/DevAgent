@@ -252,9 +252,14 @@ async function runTask(
       };
     }
 
-    const result = await executePlan(plan);
-    console.log(`  exit code: ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`);
-    return { call_id: call.call_id, ok: true, result: result as unknown as object };
+    try {
+      const result = await executePlan(plan);
+      console.log(`  exit code: ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`);
+      return { call_id: call.call_id, ok: true, result: result as unknown as object };
+    } catch (err) {
+      // e.g. the program isn't installed (spawn ENOENT) — report it to the agent, don't crash the session.
+      return toToolResultError(call.call_id, err);
+    }
   }
 
   async function handleMessage(envelope: Envelope): Promise<void> {

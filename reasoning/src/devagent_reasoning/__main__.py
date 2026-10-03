@@ -19,7 +19,7 @@ from .graph import build_graph, initial_state
 from .model import build_model
 from .protocol import FramingError, LineFramer, SchemaRegistry, encode_message, find_repo_root, make_envelope
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
 
 
 def main() -> int:
