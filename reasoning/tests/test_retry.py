@@ -75,3 +75,19 @@ def test_graph_plan_node_survives_a_rate_limited_model_call():
     result = graph.invoke(initial_state("t", "/r", 5), config={"configurable": {"thread_id": "rl"}})
     assert result["final_answer"] == "done"
     assert any(s == "rate_limited" for s, _ in events)
+
+
+def test_parses_hour_minute_second_hints():
+    msg = "RESOURCE_EXHAUSTED 429. Please retry in 15h58m59.06s."
+    assert suggested_wait_s(RuntimeError(msg)) == pytest.approx(15 * 3600 + 58 * 60 + 59.06 + 1)
+
+
+def test_fails_fast_instead_of_waiting_hours_on_a_daily_quota():
+    sleeps = []
+
+    def daily_cap():
+        raise RuntimeError("RESOURCE_EXHAUSTED 429. Please retry in 15h58m59s.")
+
+    with pytest.raises(RuntimeError, match="quota exhausted"):
+        invoke_with_retry(daily_cap, lambda s, d: None, sleep=sleeps.append)
+    assert sleeps == []  # never slept — failed on the first attempt
