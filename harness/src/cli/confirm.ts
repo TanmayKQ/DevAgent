@@ -79,6 +79,9 @@ export interface ConfirmChannel {
    * which wants a free-text answer, not a yes/no) — empty string if the stream closed with no
    * answer, same "absence is not an error" spirit as ask(). */
   askText(question: string): Promise<string>;
+  /** Like askText, but resolves null when the input stream has ended — lets a chat loop tell
+   * "the user pressed Enter on an empty line" from "stdin closed, stop prompting". */
+  askLine(question: string): Promise<string | null>;
   /** Releases the underlying input stream so the process can exit naturally. Call once, after
    * the last ask()/askText(). */
   dispose(): void;
@@ -101,6 +104,10 @@ export function createConfirmChannel(
       output.write(question);
       const line = await reader.readLine();
       return line ?? "";
+    },
+    async askLine(question: string): Promise<string | null> {
+      output.write(question);
+      return reader.readLine();
     },
     dispose(): void {
       reader.dispose();

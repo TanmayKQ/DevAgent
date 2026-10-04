@@ -5,8 +5,15 @@ reads the code, makes changes, runs the tests, checks its own work, and shows yo
 does — with a diff and a confirmation before anything is written or run.
 
 ```
-$ devagent run "fix the failing test for clamp() in src/math.js" --repo ./my-project
-→ planning
+$ cd my-project
+$ devagent
+
+DevAgent 0.1.0
+default model (gemini)
+D:\my-project
+mode: confirm before changes
+────────────────────────────────────────────────────────────
+> fix the failing clamp test in src/math.js
   ⚙ read_file({"path":"src/math.js"})
   ⚙ apply_patch(...)
 --- a/src/math.js
@@ -15,8 +22,15 @@ $ devagent run "fix the failing test for clamp() in src/math.js" --repo ./my-pro
 +  return Math.min(Math.max(n, min), max);
 Apply this apply_patch to src/math.js? [y/N] y
   ⚙ run_command(npm test)  →  exit code: 0
-DevAgent: Fixed clamp() to bound n between min and max; the clamp tests now pass.
+
+Fixed clamp() to bound n between min and max; the clamp tests now pass.
+────────────────────────────────────────────────────────────
+>
 ```
+
+Run `devagent` in any project folder and chat: it works in the current directory, remembers your
+last few messages, and shows you every change before it happens. (Prefer one-shot use?
+`devagent run "<task>" --repo <path>` still works.)
 
 It is built as two cooperating processes — a **Node/TypeScript harness** that owns everything
 with side effects (files, commands, safety, logging) and a **Python/LangGraph reasoning loop**
@@ -34,11 +48,15 @@ npm run build
 npm run doctor       # checks everything is wired up correctly
 ```
 
-Then:
+Then start chatting. To get a global `devagent` command you can run from any folder:
 
 ```bash
-npm run devagent -- run "what does this repo do?" --repo /path/to/your/project
+npm link             # one time, from this repo
+cd /path/to/your/project
+devagent             # opens the chat
 ```
+
+Without `npm link`, run `npm run devagent` from this repo (add `-- --repo <path>` to point it at another project).
 
 `devagent doctor` tells you exactly what's wrong (and how to fix it) if anything isn't ready.
 
@@ -46,10 +64,14 @@ npm run devagent -- run "what does this repo do?" --repo /path/to/your/project
 
 | Command | What it does |
 |---|---|
-| `devagent run "<task>" --repo <path>` | Run a task against a repository |
+| `devagent` (or `devagent chat`) | Interactive chat in the current directory (`--repo`, `--model`, `--yolo` available) |
+| `devagent run "<task>" --repo <path>` | Run one task and exit (scripts, benchmark) |
 | `devagent doctor` | Check Node, Python, the Python install, and your API key |
 | `devagent replay <session\|latest>` | Print a past session's audit log as a readable transcript |
 | `devagent selftest` | Verify the two processes can talk to each other (no API key needed) |
+
+Inside the chat: `/help`, `/yolo` (toggle auto-approve), `/clear` (forget the conversation),
+`/status`, `/exit`. Ctrl+C also quits cleanly.
 
 `run` flags: `--repo <path>` (required), `--model <name>` (default `gemini-3.8-flash`),
 `--max-iterations <n>` (default 15), `--yolo` / `--auto` (skip confirmation prompts),

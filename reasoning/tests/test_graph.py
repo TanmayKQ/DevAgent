@@ -136,3 +136,24 @@ def test_ask_user_uses_the_same_interrupt_resume_contract_as_a_tool_call():
     assert result["final_answer"] == "Using spaces, as you said."
     tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert any('"answer": "spaces"' in m.content for m in tool_messages)
+
+
+def test_initial_state_carries_chat_history_before_the_new_task():
+    from langchain_core.messages import SystemMessage
+
+    state = initial_state(
+        "now fix it",
+        "/repo",
+        5,
+        history=[{"user": "what is wrong?", "assistant": "capitalize() crashes on empty input."}],
+    )
+    msgs = state["messages"]
+    assert isinstance(msgs[0], SystemMessage)
+    assert [type(m).__name__ for m in msgs[1:]] == ["HumanMessage", "AIMessage", "HumanMessage"]
+    assert msgs[1].content == "what is wrong?"
+    assert msgs[2].content == "capitalize() crashes on empty input."
+    assert msgs[-1].content == "now fix it"
+
+
+def test_initial_state_without_history_is_unchanged():
+    assert len(initial_state("t", "/r", 5)["messages"]) == 2

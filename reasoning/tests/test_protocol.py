@@ -134,3 +134,13 @@ def test_schema_registry_accepts_empty_ask_user_response_answer():
     envelope = make_envelope("ask_user_response", {"answer": ""}, "session-1")
     result = registry.validate_envelope(envelope)
     assert result.valid, result.errors
+
+
+def test_task_start_accepts_optional_history_and_rejects_malformed_history():
+    registry = SchemaRegistry(REPO_ROOT / "schemas")
+    base = {"task": "t", "repo_root": "/r", "max_iterations": 3}
+    ok = make_envelope("task_start", {**base, "history": [{"user": "q", "assistant": "a"}]}, "s")
+    assert registry.validate_envelope(ok).valid
+    assert registry.validate_envelope(make_envelope("task_start", base, "s")).valid
+    bad = make_envelope("task_start", {**base, "history": [{"user": "q"}]}, "s")
+    assert not registry.validate_envelope(bad).valid

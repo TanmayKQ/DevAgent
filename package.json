@@ -12,5 +12,8 @@
     "setup": "node scripts/setup.js",
     "doctor": "node harness/dist/cli.js doctor",
     "devagent": "node harness/dist/cli.js"
+  },
+  "bin": {
+    "devagent": "harness/dist/cli.js"
   }
 }

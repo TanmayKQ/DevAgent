@@ -22,6 +22,17 @@ from .protocol import FramingError, LineFramer, SchemaRegistry, encode_message, 
 DEFAULT_MODEL = "gemini-3.8-flash"
 
 
+_MODELS: dict[str, Any] = {}
+
+
+def _get_model(schemas_dir: Path, name: str):
+    """One model per process: an interactive session sends many tasks, and rebuilding the client
+    (or restarting a scripted fake model) for each one would be wasteful and wrong."""
+    if name not in _MODELS:
+        _MODELS[name] = build_model(schemas_dir, name)
+    return _MODELS[name]
+
+
 def main() -> int:
     repo_root = find_repo_root(Path(__file__).resolve().parent)
     load_dotenv(repo_root / ".env")
@@ -55,11 +66,13 @@ def _run_task(task_envelope: dict, envelopes: Iterator[tuple[str, Any]], stdout,
         _write(stdout, make_envelope("plan_update", body, session_id))
 
     try:
-        model = build_model(repo_root / "schemas", payload.get("model") or DEFAULT_MODEL)
+        model = _get_model(repo_root / "schemas", payload.get("model") or DEFAULT_MODEL)
         graph = build_graph(model, notify, checkpointer=checkpointer)
 
-        config = {"configurable": {"thread_id": session_id}}
-        state = initial_state(payload["task"], payload["repo_root"], payload["max_iterations"])
+        # A fresh thread per task: one chat session sends many task_starts, and reusing the session id
+        # would merge each new task into the previous task's finished checkpoint.
+        config = {"configurable": {"thread_id": task_envelope["id"]}}
+        state = initial_state(payload["task"], payload["repo_root"], payload["max_iterations"], payload.get("history"))
         result = graph.invoke(state, config=config)
 
         while "__interrupt__" in result:

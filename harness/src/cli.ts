@@ -9,6 +9,8 @@ import { findRepoRoot } from "./config/repoPaths.js";
 import { resolvePython } from "./config/python.js";
 import { runDoctor, formatChecks } from "./cli/doctor.js";
 import { parseLog, formatReplay, resolveLogPath } from "./cli/replay.js";
+import { runChat } from "./cli/chat.js";
+import { createAgentSession } from "./session.js";
 import { readFileSync } from "node:fs";
 import { PythonReasoningProcess } from "./process/pythonProcess.js";
 import { AuditLogger } from "./logging/auditLog.js";
@@ -118,6 +120,41 @@ async function runSelftest(pythonCmd: string, verbose: boolean): Promise<void> {
 }
 
 program
+  .command("chat", { isDefault: true })
+  .description("interactive chat with the agent in the current directory (this is what `devagent` does with no command)")
+  .option("--repo <path>", "repository to work in (default: the current directory)")
+  .option("--model <name>", "override the reasoning loop's default model")
+  .option("--max-iterations <n>", "maximum plan/act iterations per message", "15")
+  .option("--yolo", "start with confirmations off (toggle later with /yolo)", false)
+  .option("--auto", "alias for --yolo", false)
+  .action(
+    async (cmdOpts: { repo?: string; model?: string; maxIterations: string; yolo: boolean; auto: boolean }) => {
+      const opts = program.opts<{ verbose: boolean; python?: string }>();
+      const maxIterations = Number.parseInt(cmdOpts.maxIterations, 10);
+      if (!Number.isInteger(maxIterations) || maxIterations < 1) {
+        console.error(`--max-iterations must be a positive integer, got: ${cmdOpts.maxIterations}`);
+        process.exitCode = 1;
+        return;
+      }
+      const repoRoot = resolve(process.cwd(), cmdOpts.repo ?? ".");
+      if (!existsSync(repoRoot) || !statSync(repoRoot).isDirectory()) {
+        console.error(`--repo does not point to an existing directory: ${repoRoot}`);
+        process.exitCode = 1;
+        return;
+      }
+      await runChat({
+        repoRoot,
+        pythonCmd: resolvePython(opts.python ?? process.env.DEVAGENT_PYTHON, findRepoRoot(__dirname)),
+        model: cmdOpts.model,
+        maxIterations,
+        autoApprove: cmdOpts.yolo || cmdOpts.auto,
+        verbose: opts.verbose,
+        devAgentRoot: findRepoRoot(__dirname),
+      });
+    },
+  );
+
+program
   .command("run <task>")
   .description("run a natural-language task against a repository")
   .requiredOption("--repo <path>", "path to the target repository")
@@ -169,209 +206,28 @@ async function runTask(
     return;
   }
 
-  const sessionId = randomUUID();
-  const devAgentRoot = findRepoRoot(__dirname);
-  const schemasDir = join(devAgentRoot, "schemas");
-  initSchemas(schemasDir);
-  initToolRegistry(schemasDir);
+  // One channel for the whole run, created lazily on the first prompt actually needed (a
+  // read-only task never touches stdin at all) — see confirm.ts for why one shared reader matters.
+  let channel: ConfirmChannel | undefined;
+  const getChannel = (): ConfirmChannel => (channel ??= createConfirmChannel());
 
-  const logger = new AuditLogger(sessionId, join(devAgentRoot, ".devagent", "logs"));
-  const proc = new PythonReasoningProcess({
-    command: pythonCmd,
-    args: ["-m", "devagent_reasoning"],
-    cwd: join(devAgentRoot, "reasoning", "src"),
+  const session = createAgentSession({
+    repoRoot: targetRepoRoot,
+    pythonCmd,
+    model,
+    maxIterations,
+    autoApprove,
+    verbose,
+    quiet: false,
+    getChannel,
   });
+  console.log(`session ${session.sessionId}  (replay later with: devagent replay ${session.sessionId})`);
 
-  logger.log("internal", { note: "session start", task, repo: targetRepoRoot, model: model ?? "default", autoApprove, maxIterations });
-  console.log(`session ${sessionId}  (replay later with: devagent replay ${sessionId})`);
-
-  proc.on("send", (envelope: Envelope) => {
-    logger.log("to_python", envelope);
-    if (verbose) process.stderr.write(`-> ${JSON.stringify(envelope)}\n`);
-  });
-  let stderrTail = "";
-  proc.on("stderr", (text: string) => {
-    stderrTail = (stderrTail + text).slice(-800);
-    if (verbose) process.stderr.write(`[python:stderr] ${text}`);
-  });
-
-  let settle!: (exitCode: number) => void;
-  const done = new Promise<number>((resolvePromise) => {
-    settle = resolvePromise;
-  });
-
-  // One channel for the whole task run, created lazily on the first confirmation actually
-  // needed (a read-only task never touches stdin at all) and reused for every one after it —
-  // see confirm.ts for why this matters with piped/scripted input.
-  let confirmChannel: ConfirmChannel | undefined;
-  function getConfirmChannel(): ConfirmChannel {
-    if (!confirmChannel) confirmChannel = createConfirmChannel();
-    return confirmChannel;
-  }
-
-  proc.on("message", (envelope: Envelope) => {
-    logger.log("from_python", envelope);
-    if (verbose) process.stderr.write(`<- ${JSON.stringify(envelope)}\n`);
-    void handleMessage(envelope);
-  });
-  proc.on("error", (err: Error) => {
-    logger.log("internal", { note: "process error", message: err.message });
-    console.error("Error:", err.message);
-    settle(1);
-  });
-  // If the reasoning loop dies mid-task nothing else would ever settle `done` — the CLI would
-  // hang forever. A normal shutdown (after the task finished) is excluded via `finished`.
-  let finished = false;
-  proc.on("exit", (code: number | null) => {
-    if (finished) return;
-    logger.log("internal", { note: "reasoning loop exited unexpectedly", code });
-    console.error(`
-The reasoning loop exited unexpectedly (code ${code}).`);
-    if (stderrTail.trim()) console.error(`Its last output:
-${stderrTail.trim()}`);
-    console.error("Run `devagent doctor` to check your setup.");
-    settle(1);
-  });
-
-  async function handleWriteToolCall(call: ToolCallPayload): Promise<ToolResultPayload> {
-    const validation = validateToolCallArguments(call);
-    if (!validation.valid) {
-      return { call_id: call.call_id, ok: false, error: { code: "invalid_arguments", message: validation.errors.join("; ") } };
-    }
-
-    let plan;
-    try {
-      plan =
-        call.name === "write_file"
-          ? planWriteFile(targetRepoRoot, call.arguments as WriteFileArgs)
-          : planApplyPatch(targetRepoRoot, call.arguments as ApplyPatchArgs);
-    } catch (err) {
-      return toToolResultError(call.call_id, err);
-    }
-
-    console.log(buildDiffPreview(plan));
-
-    let approved: boolean;
-    if (autoApprove) {
-      approved = true;
-    } else {
-      approved = await getConfirmChannel().ask(`Apply this ${call.name} to ${plan.relPath}? [y/N] `);
-      console.log(); // keep the result line on its own line regardless of how the terminal echoed the answer
-    }
-    if (!approved) {
-      return {
-        call_id: call.call_id,
-        ok: false,
-        error: { code: "user_rejected", message: "The user declined to apply this change." },
-      };
-    }
-
-    const applied = commitWrite(plan);
-    return { call_id: call.call_id, ok: true, result: applied as unknown as object };
-  }
-
-  async function handleRunCommandCall(call: ToolCallPayload): Promise<ToolResultPayload> {
-    const validation = validateToolCallArguments(call);
-    if (!validation.valid) {
-      return { call_id: call.call_id, ok: false, error: { code: "invalid_arguments", message: validation.errors.join("; ") } };
-    }
-
-    let plan;
-    try {
-      plan = prepareRunCommand(targetRepoRoot, call.arguments as RunCommandArgs);
-    } catch (err) {
-      return toToolResultError(call.call_id, err);
-    }
-
-    console.log(`  DevAgent wants to run: ${[plan.command, ...plan.args].join(" ")}`);
-    console.log(`  in: ${plan.relCwd === "." ? "(repository root)" : plan.relCwd}`);
-
-    let approved: boolean;
-    if (autoApprove) {
-      approved = true;
-    } else {
-      approved = await getConfirmChannel().ask(`Proceed? [y/N] `);
-      console.log(); // keep the result line on its own line regardless of how the terminal echoed the answer
-    }
-    if (!approved) {
-      return {
-        call_id: call.call_id,
-        ok: false,
-        error: { code: "user_rejected", message: "The user declined to run this command." },
-      };
-    }
-
-    try {
-      const result = await executePlan(plan);
-      console.log(`  exit code: ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`);
-      return { call_id: call.call_id, ok: true, result: result as unknown as object };
-    } catch (err) {
-      // e.g. the program isn't installed (spawn ENOENT) — report it to the agent, don't crash the session.
-      return toToolResultError(call.call_id, err);
-    }
-  }
-
-  async function handleMessage(envelope: Envelope): Promise<void> {
-    switch (envelope.type) {
-      case "plan_update": {
-        const payload = envelope.payload as { step: string; detail?: unknown };
-        const detail = payload.detail ? ` ${JSON.stringify(payload.detail)}` : "";
-        console.log(`→ ${payload.step}${detail}`);
-        return;
-      }
-      case "tool_call": {
-        const call = envelope.payload as ToolCallPayload;
-        console.log(`  ⚙ ${call.name}(${JSON.stringify(call.arguments)})`);
-        const result =
-          call.name === "run_command"
-            ? await handleRunCommandCall(call)
-            : toolRequiresConfirmation(call.name)
-              ? await handleWriteToolCall(call)
-              : await executeToolCall(targetRepoRoot, call);
-        console.log(result.ok ? "  ← ok" : `  ← error: ${result.error?.message}`);
-        proc.send(createEnvelope("tool_result", result, sessionId));
-        return;
-      }
-      case "ask_user": {
-        const payload = envelope.payload as { question: string };
-        console.log(`\nDevAgent asks: ${payload.question}`);
-        const answer = await getConfirmChannel().askText("> ");
-        console.log();
-        proc.send(createEnvelope("ask_user_response", { answer }, sessionId));
-        return;
-      }
-      case "final_answer": {
-        const payload = envelope.payload as { summary: string };
-        console.log(`\nDevAgent: ${payload.summary}`);
-        settle(0);
-        return;
-      }
-      case "error": {
-        const payload = envelope.payload as { code: string; message: string };
-        console.error(`\nReasoning loop error [${payload.code}]: ${payload.message}`);
-        settle(1);
-        return;
-      }
-      default:
-        return;
-    }
-  }
-
-  proc.start();
-  proc.send(
-    createEnvelope(
-      "task_start",
-      { task, repo_root: targetRepoRoot, max_iterations: maxIterations, ...(model ? { model } : {}) },
-      sessionId,
-    ),
-  );
-
-  process.exitCode = await done;
-  finished = true;
-  logger.log("internal", { note: "session end", exitCode: process.exitCode });
-  confirmChannel?.dispose();
-  await proc.stop();
-  await logger.close();
+  const result = await session.runTurn(task, []);
+  if (result.ok) console.log(`\nDevAgent: ${result.summary}`);
+  process.exitCode = result.ok ? 0 : 1;
+  channel?.dispose();
+  await session.close(process.exitCode);
 }
 
 program.parseAsync(process.argv);

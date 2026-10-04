@@ -214,6 +214,28 @@ under $1 for 17 tasks) or several days of free quota. `node benchmark/run.js` is
 - Docs: README rewritten around the quickstart, `docs/ARCHITECTURE.md`, `docs/DEMO.md` (script only;
   the demo video itself is not recorded).
 
+**Interactive chat (added after M5, user request).** Bare `devagent` (or `devagent chat`) opens a
+REPL in the current directory — the intended primary interface; `run` stays for scripts and the
+benchmark. Architecture: the per-task logic moved out of `cli.ts` into `harness/src/session.ts`
+(`createAgentSession`: one Python process, one audit log, many `runTurn` calls); `run` is now a thin
+wrapper over it, so every existing test still covers the same code. `harness/src/cli/chat.ts` is
+the REPL: banner, `> ` prompt, `/help /yolo /clear /status /exit`, Ctrl+C closes the session cleanly.
+Quiet mode hides the per-node status stream and shows a compact tool line instead.
+- **One stdin reader for everything.** The prompt, `[y/N]` confirmations and `ask_user` answers all
+  go through the same `ConfirmChannel`/`LineReader` (new `askLine` returns null at EOF so the REPL can
+  tell Enter-on-empty from stdin-closed). Two readers on one stdin would reintroduce the
+  lost-answer bug from M3.
+- **Memory = recent exchanges, not tool output.** `task_start` gained optional `history`
+  (`[{user, assistant}]`, max 20; harness sends the last 8 turns, answers clipped to 1500 chars).
+  `initial_state` puts them before the new task as Human/AI messages. The agent re-reads files itself.
+- **Python side:** a fresh LangGraph `thread_id` per task (the `task_start` envelope id) — reusing the
+  session id would merge each task into the previous one's finished checkpoint; and one model instance
+  per process (`_get_model`), which also makes scripted fake models continue across turns.
+- `package.json` has `bin.devagent`; `npm link` gives a global `devagent` (not run automatically — it
+  changes the user's global npm state).
+- **Not verified:** a real interactive terminal. Everything is tested with piped stdin; true TTY
+  behavior (line editing, Ctrl+C mid-turn, the rule drawn after input) has not been exercised by me.
+
 Not done: recording the demo video; live session resume (stretch); the real benchmark score.
 
 ## Decisions log

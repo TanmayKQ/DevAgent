@@ -4,15 +4,49 @@
   "title": "task_start payload",
   "type": "object",
   "additionalProperties": false,
-  "required": ["task", "repo_root", "max_iterations"],
+  "required": [
+    "task",
+    "repo_root",
+    "max_iterations"
+  ],
   "properties": {
-    "task": { "type": "string", "minLength": 1 },
+    "task": {
+      "type": "string",
+      "minLength": 1
+    },
     "repo_root": {
       "type": "string",
       "minLength": 1,
       "description": "Absolute path, for the reasoning loop's context only — the harness independently enforces the repo-root jail on every tool call and never trusts this value for that purpose."
     },
-    "max_iterations": { "type": "integer", "minimum": 1 },
-    "model": { "type": "string", "minLength": 1 }
+    "max_iterations": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "history": {
+      "type": "array",
+      "maxItems": 20,
+      "description": "Prior exchanges from an interactive chat session, oldest first, so a follow-up like 'fix that' has context. Optional; absent for one-shot runs.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "user",
+          "assistant"
+        ],
+        "properties": {
+          "user": {
+            "type": "string"
+          },
+          "assistant": {
+            "type": "string"
+          }
+        }
+      }
+    }
   }
 }

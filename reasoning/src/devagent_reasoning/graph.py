@@ -141,15 +141,24 @@ def build_graph(model: Runnable, notify: NotifyFn, checkpointer=None, sleep=None
     return graph.compile(checkpointer=checkpointer)
 
 
-def initial_state(task: str, repo_root: str, max_iterations: int) -> AgentState:
+def initial_state(
+    task: str, repo_root: str, max_iterations: int, history: Optional[list[dict[str, str]]] = None
+) -> AgentState:
     from langchain_core.messages import HumanMessage, SystemMessage
+
+    # Prior chat turns (user message -> the agent's final answer) so follow-ups have context. Only
+    # the exchange is carried over, not old tool output: the agent re-reads files itself.
+    prior: list[BaseMessage] = []
+    for turn in history or []:
+        prior.append(HumanMessage(content=turn["user"]))
+        prior.append(AIMessage(content=turn["assistant"]))
 
     return {
         "task": task,
         "repo_root": repo_root,
         "max_iterations": max_iterations,
         "iterations": 0,
-        "messages": [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=task)],
+        "messages": [SystemMessage(content=SYSTEM_PROMPT), *prior, HumanMessage(content=task)],
         "last_tool_call_id": None,
         "last_tool_result": None,
         "final_answer": None,
