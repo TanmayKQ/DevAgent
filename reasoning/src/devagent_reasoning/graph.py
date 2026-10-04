@@ -49,6 +49,23 @@ SYSTEM_PROMPT = (
     "a final plain-text answer and do not call any more tools."
 )
 
+def message_text(content: Any) -> str:
+    """A model's answer as plain text. Some models (e.g. Gemini 3) return `content` as a list of
+    blocks like [{'type':'text','text':...,'extras':{'signature':...}}] rather than a string;
+    str() on that leaks the raw block structure and an opaque signature to the user."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        return "".join(parts)
+    return str(content)
+
+
 NotifyFn = Callable[[str, Optional[dict[str, Any]]], None]
 
 
@@ -120,7 +137,7 @@ def build_graph(model: Runnable, notify: NotifyFn, checkpointer=None, sleep=None
         if state.get("final_answer"):
             return {}
         last = state["messages"][-1]
-        text = last.content if isinstance(last.content, str) else str(last.content)
+        text = message_text(last.content)
         notify("finished", None)
         return {"final_answer": text}
 

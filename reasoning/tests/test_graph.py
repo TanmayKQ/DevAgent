@@ -157,3 +157,22 @@ def test_initial_state_carries_chat_history_before_the_new_task():
 
 def test_initial_state_without_history_is_unchanged():
     assert len(initial_state("t", "/r", 5)["messages"]) == 2
+
+
+def test_message_text_extracts_text_from_content_blocks_and_hides_signatures():
+    from devagent_reasoning.graph import message_text
+
+    blocks = [{"type": "text", "text": "Hello! ", "extras": {"signature": "OPAQUE"}}, {"type": "text", "text": "Bye."}]
+    assert message_text(blocks) == "Hello! Bye."
+    assert "OPAQUE" not in message_text(blocks)
+    assert message_text("plain") == "plain"
+    assert message_text(["a", {"type": "tool_use"}, "b"]) == "ab"
+
+
+def test_final_answer_is_plain_text_when_the_model_returns_content_blocks():
+    model = FakeMessagesListChatModel(
+        responses=[AIMessage(content=[{"type": "text", "text": "All done.", "extras": {"signature": "X"}}])]
+    )
+    graph = build_graph(model, lambda s, d: None, checkpointer=InMemorySaver())
+    result = graph.invoke(initial_state("t", "/r", 3), config={"configurable": {"thread_id": "blocks"}})
+    assert result["final_answer"] == "All done."

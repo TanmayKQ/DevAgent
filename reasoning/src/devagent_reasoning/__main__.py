@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -33,10 +34,21 @@ def _get_model(schemas_dir: Path, name: str):
     return _MODELS[name]
 
 
+def _warm_up(schemas_dir: Path) -> None:
+    """Pay the one-time cost of importing the Google client and building the default model while
+    the user is still reading the banner, instead of during their first message. Best effort: a
+    failure here (e.g. no API key yet) is ignored and surfaces properly when a task actually runs."""
+    try:
+        _get_model(schemas_dir, DEFAULT_MODEL)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main() -> int:
     repo_root = find_repo_root(Path(__file__).resolve().parent)
     load_dotenv(repo_root / ".env")
     registry = SchemaRegistry(repo_root / "schemas")
+    threading.Thread(target=_warm_up, args=(repo_root / "schemas",), daemon=True).start()
 
     stdout = sys.stdout.buffer
     checkpointer = InMemorySaver()
