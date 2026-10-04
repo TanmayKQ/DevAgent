@@ -19,14 +19,16 @@ from langchain_core.runnables import Runnable
 from .tools import load_tool_specs
 
 
-def build_model(schemas_dir: Path, model_name: str) -> Runnable:
+def build_model(schemas_dir: Path, model_name: str, fast: bool = False) -> Runnable:
     fake_responses_path = os.environ.get("DEVAGENT_FAKE_LLM_RESPONSES")
     if fake_responses_path:
         return _build_fake_model(Path(fake_responses_path))
 
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    llm = ChatGoogleGenerativeAI(model=model_name)
+    # fast=True turns off extended 'thinking': roughly halves reply latency, at the cost of less
+    # careful reasoning on hard multi-step tasks — which is why it's an opt-in, not the default.
+    llm = ChatGoogleGenerativeAI(model=model_name, **({"thinking_budget": 0} if fast else {}))
     return llm.bind_tools(load_tool_specs(schemas_dir))
 
 

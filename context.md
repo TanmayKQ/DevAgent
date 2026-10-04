@@ -431,6 +431,28 @@ Not done: recording the demo video; live session resume (stretch); the real benc
   run; a Python process dying silently left it waiting forever. The `exit` handler now settles with
   the process's last stderr — excluded after normal completion so shutdown isn't misreported. — 2026-10-03
 
+- **`/fast` (user's choice, option 2 of 3).** Toggle (and `--fast` flag) that sends `fast:true` in
+  `task_start`; Python builds the model with `thinking_budget=0`. Opt-in, not default: measured
+  ~9.4s -> ~5.1s on one prompt (n=1, API latency is noisy: 3-10s), but disabling thinking trades away
+  reasoning quality on multi-step coding, which the benchmark depends on. Models are cached per
+  `(name, fast)`.
+- **Resize-aware UI (user request: "everything adjusts like Claude Code").** Terminal output is
+  write-once, so a printed rule can never stretch. Fix = own the screen: `cli/screen.ts` `Screen`
+  records every block (rules stored as "a rule", turned into dashes at draw time); on a width
+  change (debounced, only while idle at the prompt — a resize mid-task is applied when it finishes)
+  it clears screen+scrollback (`ESC[2J ESC[3J`) and redraws. Keystrokes are owned by node `readline`
+  in real terminals only (`cli/ttyChannel.ts`) so a half-typed line can be repainted (`rl.prompt(true)`);
+  piped input keeps the hand-rolled `LineReader` (readline's auto-close on a closed pipe is why M3
+  dropped it — can't happen with an interactive TTY). All session output goes through injectable
+  `print`/`printError`. Tradeoff: clearing scrollback also removes this tab's earlier shell history.
+  `DEVAGENT_PLAIN_UI=1` forces the simple path. **Verified in a real Windows ConPTY** (pywinpty,
+  `scripts/pty_resize_check.py`, manual, not in `npm test`): after resizing 60->40->90 columns the
+  only rules drawn after our clear are at the new width, the transcript is redrawn, and half-typed
+  text survives. Still not exercised: macOS/Linux terminals, Windows conhost vs Windows Terminal.
+- **Race found by the suite:** the startup warm-up thread and the first task could both build the
+  model, producing two instances (a scripted fake restarted from step 0 on turn 2). `_get_model` now
+  takes a lock. — 2026-10-04
+
 ## Open questions
 
 - (Resolved 2026-10-03: packaging = one-command setup with an auto-used `.venv`. See decisions log.)

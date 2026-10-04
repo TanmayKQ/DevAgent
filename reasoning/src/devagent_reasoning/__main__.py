@@ -24,14 +24,17 @@ DEFAULT_MODEL = "gemini-3.8-flash"
 
 
 _MODELS: dict[str, Any] = {}
+_MODELS_LOCK = threading.Lock()  # the warm-up thread and the first task can race to build the same model
 
 
-def _get_model(schemas_dir: Path, name: str):
+def _get_model(schemas_dir: Path, name: str, fast: bool = False):
     """One model per process: an interactive session sends many tasks, and rebuilding the client
     (or restarting a scripted fake model) for each one would be wasteful and wrong."""
-    if name not in _MODELS:
-        _MODELS[name] = build_model(schemas_dir, name)
-    return _MODELS[name]
+    key = f"{name}|fast={fast}"
+    with _MODELS_LOCK:
+        if key not in _MODELS:
+            _MODELS[key] = build_model(schemas_dir, name, fast)
+        return _MODELS[key]
 
 
 def _warm_up(schemas_dir: Path) -> None:
@@ -78,7 +81,7 @@ def _run_task(task_envelope: dict, envelopes: Iterator[tuple[str, Any]], stdout,
         _write(stdout, make_envelope("plan_update", body, session_id))
 
     try:
-        model = _get_model(repo_root / "schemas", payload.get("model") or DEFAULT_MODEL)
+        model = _get_model(repo_root / "schemas", payload.get("model") or DEFAULT_MODEL, bool(payload.get("fast")))
         graph = build_graph(model, notify, checkpointer=checkpointer)
 
         # A fresh thread per task: one chat session sends many task_starts, and reusing the session id

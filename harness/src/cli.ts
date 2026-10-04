@@ -125,10 +125,11 @@ program
   .option("--repo <path>", "repository to work in (default: the current directory)")
   .option("--model <name>", "override the reasoning loop's default model")
   .option("--max-iterations <n>", "maximum plan/act iterations per message", "15")
+  .option("--fast", "start with fast replies (model skips extended thinking; toggle later with /fast)", false)
   .option("--yolo", "start with confirmations off (toggle later with /yolo)", false)
   .option("--auto", "alias for --yolo", false)
   .action(
-    async (cmdOpts: { repo?: string; model?: string; maxIterations: string; yolo: boolean; auto: boolean }) => {
+    async (cmdOpts: { repo?: string; model?: string; maxIterations: string; fast: boolean; yolo: boolean; auto: boolean }) => {
       const opts = program.opts<{ verbose: boolean; python?: string }>();
       const maxIterations = Number.parseInt(cmdOpts.maxIterations, 10);
       if (!Number.isInteger(maxIterations) || maxIterations < 1) {
@@ -146,6 +147,7 @@ program
         repoRoot,
         pythonCmd: resolvePython(opts.python ?? process.env.DEVAGENT_PYTHON, findRepoRoot(__dirname)),
         model: cmdOpts.model,
+        fast: cmdOpts.fast,
         maxIterations,
         autoApprove: cmdOpts.yolo || cmdOpts.auto,
         verbose: opts.verbose,

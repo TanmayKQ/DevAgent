@@ -108,6 +108,19 @@ describe("interactive chat (integration, real CLI subprocess)", () => {
     }
   }, 40000);
 
+  it("/fast toggles fast replies and /status reflects it", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "devagent-chat-fast-"));
+    try {
+      const r = await chat(repo, "/fast\n/status\n/fast\n/exit\n", []);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("replies: thorough"); // banner default
+      expect(r.out).toContain("replies: fast (extended thinking off)");
+      expect(r.out.match(/replies: thorough/g)!.length).toBeGreaterThanOrEqual(2); // banner + toggled back
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }, 40000);
+
   it("handles slash commands without sending them to the agent", async () => {
     const repo = mkdtempSync(join(tmpdir(), "devagent-chat-slash-"));
     try {

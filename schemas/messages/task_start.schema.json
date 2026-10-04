@@ -47,6 +47,10 @@
           }
         }
       }
+    },
+    "fast": {
+      "type": "boolean",
+      "description": "Ask the model to skip extended 'thinking' for faster replies (less careful on hard multi-step work). Optional; default off."
     }
   }
 }

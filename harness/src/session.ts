@@ -29,11 +29,17 @@ export interface SessionOptions {
   repoRoot: string;
   pythonCmd: string;
   model?: string;
+  /** Skip the model's extended thinking for faster (less careful) replies. */
+  fast?: boolean;
   maxIterations: number;
   autoApprove: boolean;
   verbose: boolean;
   /** Chat mode: hide the per-node status stream, show a compact tool line instead. */
   quiet: boolean;
+  /** Where user-visible output goes (default: console). The chat routes it through its Screen so a
+   * window resize can redraw the whole conversation. */
+  print?: (text?: string) => void;
+  printError?: (text: string) => void;
   /** The one shared stdin reader (confirmations, ask_user answers, and the chat prompt). */
   getChannel: () => ConfirmChannel;
 }
@@ -46,6 +52,7 @@ export interface TurnResult {
 export interface AgentSession {
   readonly sessionId: string;
   setAutoApprove(value: boolean): void;
+  setFast(value: boolean): void;
   /** Runs one task to completion. The Python process (and its model) stays alive between turns. */
   runTurn(task: string, history: HistoryEntry[]): Promise<TurnResult>;
   /** False once the reasoning loop has died; further turns would just hang. */
@@ -67,8 +74,11 @@ export function createAgentSession(opts: SessionOptions): AgentSession {
   initSchemas(schemasDir);
   initToolRegistry(schemasDir);
 
+  const print = opts.print ?? ((t = "") => console.log(t));
+  const printError = opts.printError ?? ((t: string) => console.error(t));
   const targetRepoRoot = opts.repoRoot;
   let autoApprove = opts.autoApprove;
+  let fast = opts.fast ?? false;
   const logger = new AuditLogger(sessionId, join(devAgentRoot, ".devagent", "logs"));
   const proc = new PythonReasoningProcess({
     command: opts.pythonCmd,
@@ -104,7 +114,7 @@ export function createAgentSession(opts: SessionOptions): AgentSession {
   });
   proc.on("error", (err: Error) => {
     logger.log("internal", { note: "process error", message: err.message });
-    console.error("Error:", err.message);
+    printError(`Error: ${err.message}`);
     alive = false;
     settleTurn?.({ ok: false });
   });
@@ -114,9 +124,9 @@ export function createAgentSession(opts: SessionOptions): AgentSession {
     alive = false;
     if (closing) return;
     logger.log("internal", { note: "reasoning loop exited unexpectedly", code });
-    console.error(`\nThe reasoning loop exited unexpectedly (code ${code}).`);
-    if (stderrTail.trim()) console.error(`Its last output:\n${stderrTail.trim()}`);
-    console.error("Run `devagent doctor` to check your setup.");
+    printError(`\nThe reasoning loop exited unexpectedly (code ${code}).`);
+    if (stderrTail.trim()) printError(`Its last output:\n${stderrTail.trim()}`);
+    printError("Run `devagent doctor` to check your setup.");
     settleTurn?.({ ok: false });
   });
 
@@ -136,14 +146,14 @@ export function createAgentSession(opts: SessionOptions): AgentSession {
       return toToolResultError(call.call_id, err);
     }
 
-    console.log(buildDiffPreview(plan));
+    print(buildDiffPreview(plan));
 
     let approved: boolean;
     if (autoApprove) {
       approved = true;
     } else {
       approved = await opts.getChannel().ask(`Apply this ${call.name} to ${plan.relPath}? [y/N] `);
-      console.log(); // keep the result line on its own line regardless of how the terminal echoed the answer
+      print(); // keep the result line on its own line regardless of how the terminal echoed the answer
     }
     if (!approved) {
       return {
@@ -170,15 +180,15 @@ export function createAgentSession(opts: SessionOptions): AgentSession {
       return toToolResultError(call.call_id, err);
     }
 
-    console.log(`  DevAgent wants to run: ${[plan.command, ...plan.args].join(" ")}`);
-    console.log(`  in: ${plan.relCwd === "." ? "(repository root)" : plan.relCwd}`);
+    print(`  DevAgent wants to run: ${[plan.command, ...plan.args].join(" ")}`);
+    print(`  in: ${plan.relCwd === "." ? "(repository root)" : plan.relCwd}`);
 
     let approved: boolean;
     if (autoApprove) {
       approved = true;
     } else {
       approved = await opts.getChannel().ask(`Proceed? [y/N] `);
-      console.log();
+      print();
     }
     if (!approved) {
       return {
@@ -190,7 +200,7 @@ export function createAgentSession(opts: SessionOptions): AgentSession {
 
     try {
       const result = await executePlan(plan);
-      console.log(`  exit code: ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`);
+      print(`  exit code: ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`);
       return { call_id: call.call_id, ok: true, result: result as unknown as object };
     } catch (err) {
       // e.g. the program isn't installed (spawn ENOENT) — report it to the agent, don't crash the session.
@@ -204,33 +214,33 @@ export function createAgentSession(opts: SessionOptions): AgentSession {
         const payload = envelope.payload as { step: string; detail?: Record<string, unknown> };
         if (opts.quiet) {
           if (payload.step === "rate_limited") {
-            console.log(`  … rate limited by the model API, retrying in ${payload.detail?.retry_in_s}s`);
+            print(`  … rate limited by the model API, retrying in ${payload.detail?.retry_in_s}s`);
           }
           return;
         }
         const detail = payload.detail ? ` ${JSON.stringify(payload.detail)}` : "";
-        console.log(`→ ${payload.step}${detail}`);
+        print(`→ ${payload.step}${detail}`);
         return;
       }
       case "tool_call": {
         const call = envelope.payload as ToolCallPayload;
         const args = JSON.stringify(call.arguments);
-        console.log(`  ⚙ ${call.name}(${opts.quiet && args.length > 110 ? `${args.slice(0, 110)}…` : args})`);
+        print(`  ⚙ ${call.name}(${opts.quiet && args.length > 110 ? `${args.slice(0, 110)}…` : args})`);
         const result =
           call.name === "run_command"
             ? await handleRunCommandCall(call)
             : toolRequiresConfirmation(call.name)
               ? await handleWriteToolCall(call)
               : await executeToolCall(targetRepoRoot, call);
-        console.log(result.ok ? "  ← ok" : `  ← error: ${result.error?.message}`);
+        print(result.ok ? "  ← ok" : `  ← error: ${result.error?.message}`);
         proc.send(createEnvelope("tool_result", result, sessionId));
         return;
       }
       case "ask_user": {
         const payload = envelope.payload as { question: string };
-        console.log(`\nDevAgent asks: ${payload.question}`);
+        print(`\nDevAgent asks: ${payload.question}`);
         const answer = await opts.getChannel().askText("> ");
-        console.log();
+        print();
         proc.send(createEnvelope("ask_user_response", { answer }, sessionId));
         return;
       }
@@ -241,7 +251,7 @@ export function createAgentSession(opts: SessionOptions): AgentSession {
       }
       case "error": {
         const payload = envelope.payload as { code: string; message: string };
-        console.error(`\nReasoning loop error [${payload.code}]: ${payload.message}`);
+        printError(`\nReasoning loop error [${payload.code}]: ${payload.message}`);
         settleTurn?.({ ok: false });
         return;
       }
@@ -257,6 +267,10 @@ export function createAgentSession(opts: SessionOptions): AgentSession {
     setAutoApprove(value: boolean): void {
       autoApprove = value;
       logger.log("internal", { note: "auto-approve changed", autoApprove: value });
+    },
+    setFast(value: boolean): void {
+      fast = value;
+      logger.log("internal", { note: "fast mode changed", fast: value });
     },
     isAlive: () => alive,
     runTurn(task: string, history: HistoryEntry[]): Promise<TurnResult> {
@@ -274,6 +288,7 @@ export function createAgentSession(opts: SessionOptions): AgentSession {
               repo_root: targetRepoRoot,
               max_iterations: opts.maxIterations,
               ...(opts.model ? { model: opts.model } : {}),
+              ...(fast ? { fast: true } : {}),
               ...(history.length > 0 ? { history } : {}),
             },
             sessionId,

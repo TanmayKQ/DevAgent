@@ -70,8 +70,12 @@ Without `npm link`, run `npm run devagent` from this repo (add `-- --repo <path>
 | `devagent replay <session\|latest>` | Print a past session's audit log as a readable transcript |
 | `devagent selftest` | Verify the two processes can talk to each other (no API key needed) |
 
-Inside the chat: `/help`, `/yolo` (toggle auto-approve), `/clear` (forget the conversation),
-`/status`, `/exit`. Ctrl+C also quits cleanly.
+Inside the chat: `/help`, `/yolo` (toggle auto-approve), `/fast` (toggle fast replies), `/clear`
+(forget the conversation), `/status`, `/exit`. Ctrl+C also quits cleanly. Resize the window and the
+whole conversation redraws at the new width.
+
+`/fast` turns off the model's extended thinking: replies are noticeably quicker but it reasons less
+carefully, so leave it off (the default) for real multi-step work.
 
 `run` flags: `--repo <path>` (required), `--model <name>` (default `gemini-3.8-flash`),
 `--max-iterations <n>` (default 15), `--yolo` / `--auto` (skip confirmation prompts),

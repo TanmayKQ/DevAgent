@@ -176,3 +176,63 @@ def test_final_answer_is_plain_text_when_the_model_returns_content_blocks():
     graph = build_graph(model, lambda s, d: None, checkpointer=InMemorySaver())
     result = graph.invoke(initial_state("t", "/r", 3), config={"configurable": {"thread_id": "blocks"}})
     assert result["final_answer"] == "All done."
+
+
+def test_fast_mode_turns_off_thinking_and_default_leaves_it_alone(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    from devagent_reasoning import model as model_mod
+
+    seen = []
+
+    class FakeChat:
+        def __init__(self, **kwargs):
+            seen.append(kwargs)
+
+        def bind_tools(self, tools):
+            return self
+
+    monkeypatch.delenv("DEVAGENT_FAKE_LLM_RESPONSES", raising=False)
+    monkeypatch.setitem(sys.modules, "langchain_google_genai", types.SimpleNamespace(ChatGoogleGenerativeAI=FakeChat))
+    monkeypatch.setattr(model_mod, "load_tool_specs", lambda _d: [])
+
+    model_mod.build_model(tmp_path, "m")
+    model_mod.build_model(tmp_path, "m", fast=True)
+    assert seen[0] == {"model": "m"}
+    assert seen[1] == {"model": "m", "thinking_budget": 0}
+
+
+def test_task_start_accepts_fast_flag():
+    from pathlib import Path
+
+    from devagent_reasoning.protocol import SchemaRegistry, find_repo_root, make_envelope
+
+    registry = SchemaRegistry(find_repo_root(Path(__file__).resolve().parent) / "schemas")
+    base = {"task": "t", "repo_root": "/r", "max_iterations": 3}
+    assert registry.validate_envelope(make_envelope("task_start", {**base, "fast": True}, "s")).valid
+    assert not registry.validate_envelope(make_envelope("task_start", {**base, "fast": "yes"}, "s")).valid
+
+
+def test_get_model_builds_one_instance_even_when_called_concurrently(monkeypatch):
+    import threading
+    import time
+
+    from devagent_reasoning import __main__ as main_mod
+
+    built = []
+
+    def slow_build(schemas_dir, name, fast=False):
+        time.sleep(0.05)  # widen the race window
+        obj = object()
+        built.append(obj)
+        return obj
+
+    monkeypatch.setattr(main_mod, "build_model", slow_build)
+    monkeypatch.setattr(main_mod, "_MODELS", {})
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(main_mod._get_model(None, "m"))) for _ in range(6)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert len(built) == 1
+    assert all(r is results[0] for r in results)
